@@ -165,6 +165,36 @@ class SpeedClient:
                 out[et] = res
         return out
 
+    # ── Trades ───────────────────────────────────────────────────────────────
+
+    async def get_first_trade_for_ticker(self, ticker: str) -> dict | None:
+        """
+        Paginate GET /markets/trades to find the oldest (first-ever) trade
+        for a specific market ticker.
+
+        Kalshi returns trades newest-first; we follow cursor pages until the
+        cursor is empty, then take trades[-1] from the final page.
+
+        Returns the trade dict (keys: created_time, price, size, ticker)
+        or None if the market has never traded.
+
+        NOTE: min_ts param causes 400 — use ticker + cursor pagination only.
+        """
+        cursor: str = ""
+        last_batch: list[dict] = []
+        while True:
+            params: dict = {"ticker": ticker, "limit": 100}
+            if cursor:
+                params["cursor"] = cursor
+            r        = await self._get("/markets/trades", params=params)
+            batch    = r.get("trades", [])
+            if batch:
+                last_batch = batch
+            cursor = r.get("cursor", "")
+            if not cursor or not batch:
+                break
+        return last_batch[-1] if last_batch else None
+
     # ── Balance ───────────────────────────────────────────────────────────────
 
     async def get_balance(self) -> float:

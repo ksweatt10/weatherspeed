@@ -113,6 +113,25 @@ def upsert_market_timing(event_ticker: str, series_ticker: str, city: str,
               created_time, open_time))
 
 
+def upsert_first_trade_time(ticker: str, iso_ts: str) -> None:
+    """
+    Record the first-ever trade time on a bucket (from Kalshi trades API).
+    iso_ts is the created_time string returned by GET /markets/trades.
+    Only writes if first_bid_time is currently NULL (never overwrites).
+    """
+    with _conn() as con:
+        con.execute("""
+            UPDATE market_buckets SET first_bid_time = ?
+            WHERE ticker = ? AND first_bid_time IS NULL
+        """, (iso_ts, ticker))
+        con.execute("""
+            UPDATE market_timing SET first_bid_time = ?
+            WHERE event_ticker = (
+                SELECT event_ticker FROM market_buckets WHERE ticker = ?
+            ) AND first_bid_time IS NULL
+        """, (iso_ts, ticker))
+
+
 def upsert_first_bid_time(ticker: str, ts_ms: int) -> None:
     """Record first-bid timestamp on a bucket (from WS OI 0→non-zero)."""
     iso = _ms_to_iso(ts_ms)

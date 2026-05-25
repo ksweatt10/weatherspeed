@@ -184,6 +184,30 @@ def api_refresh_markets():
     return jsonify({"ok": True, "msg": "Market discovery triggered"})
 
 
+@app.get("/api/pull-first-trades")
+def api_pull_first_trades():
+    """
+    For all currently-discovered open-market buckets, paginate the Kalshi
+    trades API to find each bucket's oldest trade and store the timestamp
+    in market_buckets.first_bid_time.
+
+    Pass ?overwrite=1 to re-fetch buckets that already have a value.
+    Blocks for up to 120s synchronously so the response includes results.
+    """
+    import asyncio, threading
+    from market_watcher import pull_first_trades_for_open_markets
+    overwrite = request.args.get("overwrite", "0") == "1"
+    results = {}
+
+    def _run():
+        results.update(asyncio.run(pull_first_trades_for_open_markets(overwrite=overwrite)))
+
+    t = threading.Thread(target=_run, name="first-trades", daemon=True)
+    t.start()
+    t.join(timeout=120)
+    return jsonify({"ok": True, **results})
+
+
 @app.get("/api/backfill-research")
 def api_backfill_research():
     """Pull up to 7 days of historical market data for all 32 series."""

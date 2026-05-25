@@ -259,12 +259,14 @@ input:checked+.slider:before{transform:translateX(18px)}
     <h2>Market Timing — Historical</h2>
     <div class="acts">
       <button class="btn" onclick="triggerBackfill()">📥 Backfill 7 Days</button>
+      <button class="btn" onclick="triggerPullFirstTrades()">⏱ Pull First Trades</button>
       <button class="btn" onclick="loadResearch()">🔄 Refresh</button>
     </div>
   </div>
   <p style="color:var(--muted);font-size:11px;margin-bottom:10px">
     Markets created ~09:30–09:31 UTC (5:30 AM ET) · Open at exactly 14:00:00 UTC (10:00 AM ET).
-    <strong style="color:var(--text)">First Bid</strong> = first time open interest went non-zero on any bucket (detected via WebSocket from today onward; historical = unavailable).
+    <strong style="color:var(--text)">First Trade</strong> = oldest trade on any bucket from the Kalshi trades API.
+    Click <em>Pull First Trades</em> to populate for all currently-discovered markets.
   </p>
 
   <div id="creation-chart">
@@ -646,6 +648,19 @@ async function triggerBackfill() {
     toast(`Backfill done: ${r.inserted||0} events, ${r.skipped||0} skipped`,"ok");
     if (document.querySelector("nav button.active").dataset.tab==="research") loadResearch();
   } catch(e) { toast("Backfill failed: "+e.message,"err"); }
+}
+
+async function triggerPullFirstTrades() {
+  toast("Pulling first trades — may take ~60s for many buckets…","info");
+  try {
+    const r = await api("/api/pull-first-trades");
+    toast(
+      `First trades: ${r.pulled||0} pulled, ${r.no_trades||0} no trades, `+
+      `${r.already_set||0} already set`,
+      r.errors&&r.errors.length ? "info" : "ok"
+    );
+    if (document.querySelector("nav button.active").dataset.tab==="research") loadResearch();
+  } catch(e) { toast("Pull first trades failed: "+e.message,"err"); }
 }
 
 async function triggerTestBatch() {

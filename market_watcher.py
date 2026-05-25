@@ -300,6 +300,98 @@ async def run_research_backfill(days: int = 7) -> dict:
     return {"inserted": inserted, "skipped": skipped, "errors": errors}
 
 
+async def pull_first_trades_for_open_markets(overwrite: bool = False) -> dict:
+    """
+    For every bucket in the currently-discovered open markets (today + tomorrow),
+    paginate GET /markets/trades to find the oldest trade and store its timestamp
+    in market_buckets.first_bid_time (and market_timing.first_bid_time).
+
+    Concurrency is capped at 5 simultaneous requests to stay well under rate limits.
+    Pagination is only needed when a market has >100 trades; most buckets have
+    far fewer, so a single page suffices.
+
+    Args:
+        overwrite: if True, re-fetch even buckets that already have a first_bid_time.
+                   Defaults to False (skip already-populated rows).
+
+    Returns summary dict: {pulled, no_trades, already_set, errors, tickers}
+    """
+    from db.models import upsert_first_trade_time, get_bucket_timing
+
+    today_str = _today_et_str()
+    discovered = state.get_discovered_markets()
+    if not discovered:
+        return {"pulled": 0, "no_trades": 0, "already_set": 0,
+                "errors": ["no markets discovered — run Refresh Markets first"],
+                "tickers": 0}
+
+    # Collect all tickers across discovered events
+    tickers: list[str] = [
+        m.get("ticker", "")
+        for mkts in discovered.values()
+        for m in mkts
+        if m.get("ticker")
+    ]
+
+    if not overwrite:
+        # Skip buckets that already have a first_bid_time in the DB
+        from db.models import _conn as _db_conn
+        with _db_conn() as con:
+            placeholders = ",".join("?" * len(tickers))
+            rows = con.execute(
+                f"SELECT ticker FROM market_buckets "
+                f"WHERE ticker IN ({placeholders}) AND first_bid_time IS NOT NULL",
+                tickers
+            ).fetchall()
+        already_done = {r[0] for r in rows}
+        tickers = [t for t in tickers if t not in already_done]
+        already_set = len(already_done)
+    else:
+        already_set = 0
+
+    if not tickers:
+        return {"pulled": 0, "no_trades": 0, "already_set": already_set,
+                "errors": [], "tickers": 0}
+
+    pulled    = 0
+    no_trades = 0
+    errors:   list[str] = []
+
+    _sem = asyncio.Semaphore(5)   # 5 concurrent pages at a time
+
+    async with SpeedClient() as client:
+        async def _fetch_one(ticker: str):
+            async with _sem:
+                try:
+                    trade = await client.get_first_trade_for_ticker(ticker)
+                    return ticker, trade, None
+                except Exception as e:
+                    return ticker, None, str(e)
+
+        tasks   = [_fetch_one(t) for t in tickers]
+        results = await asyncio.gather(*tasks)
+
+    for ticker, trade, err in results:
+        if err:
+            errors.append(f"{ticker}: {err}")
+        elif trade is None:
+            no_trades += 1
+        else:
+            iso_ts = trade.get("created_time", "")
+            if iso_ts:
+                upsert_first_trade_time(ticker, iso_ts)
+                pulled += 1
+            else:
+                no_trades += 1
+
+    summary = (f"first trades: {pulled} pulled, {no_trades} no trades, "
+               f"{already_set} already set, {len(errors)} errors")
+    print(f"[watcher] {summary}")
+    log_event(today_str, "FIRST_TRADES", summary)
+    return {"pulled": pulled, "no_trades": no_trades, "already_set": already_set,
+            "errors": errors, "tickers": len(tickers)}
+
+
 def run_open_trigger() -> None:
     """
     FALLBACK ONLY — fires at 14:00:05 UTC if WS hasn't already triggered.
