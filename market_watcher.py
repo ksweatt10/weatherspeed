@@ -232,12 +232,17 @@ async def run_research_backfill(days: int = 7) -> dict:
         # This is a background operation — taking a few extra seconds is fine.
         _sem = asyncio.Semaphore(5)
 
+        event_limit = days + 3   # fetch a few extra so [:days] always has enough
+
         async def _fetch_settled(series_ticker: str):
             async with _sem:
                 try:
-                    events  = await client.list_events(series_ticker, status="settled")
-                    open_ev = await client.list_events(series_ticker, status="open")
-                    return series_ticker, events + open_ev
+                    # settled events cover past days; open covers today/upcoming
+                    settled = await client.list_events(
+                        series_ticker, status="settled", limit=event_limit)
+                    open_ev = await client.list_events(
+                        series_ticker, status="open",    limit=3)
+                    return series_ticker, settled + open_ev
                 except Exception as e:
                     return series_ticker, e
 
@@ -260,8 +265,9 @@ async def run_research_backfill(days: int = 7) -> dict:
                 continue
 
             event_tickers = [e.get("event_ticker", "") for e in events]
+            # market_status=None → no status filter → returns finalized/settled markets too
             market_map    = await client.get_all_markets_for_events(
-                event_tickers, concurrency=3)   # throttle backfill fetches
+                event_tickers, concurrency=3, market_status=None)
 
             for evt in events:
                 et      = evt.get("event_ticker", "")

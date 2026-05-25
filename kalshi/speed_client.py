@@ -109,22 +109,26 @@ class SpeedClient:
     # ── Market discovery ──────────────────────────────────────────────────────
 
     async def list_events(self, series_ticker: str,
-                          status: str = "open") -> list[dict]:
+                          status: str = "open",
+                          limit: int = 5) -> list[dict]:
         """Return events for a series (e.g. all open KXHIGHTATL events)."""
-        data = await self._get("/events", params={
-            "series_ticker": series_ticker,
-            "status":        status,
-            "limit":         5,
-        })
+        params: dict = {"series_ticker": series_ticker, "limit": limit}
+        if status:
+            params["status"] = status
+        data = await self._get("/events", params=params)
         return data.get("events", [])
 
-    async def get_markets_for_event(self, event_ticker: str) -> list[dict]:
-        """Return all bucket markets for a single event."""
-        data = await self._get("/markets", params={
-            "event_ticker": event_ticker,
-            "status":       "open",
-            "limit":        20,
-        })
+    async def get_markets_for_event(self, event_ticker: str,
+                                     status: str | None = "open") -> list[dict]:
+        """
+        Return all bucket markets for a single event.
+        status="open"     — live markets only (default, used at market open)
+        status=None       — all markets regardless of status (used for backfill)
+        """
+        params: dict = {"event_ticker": event_ticker, "limit": 20}
+        if status:
+            params["status"] = status
+        data = await self._get("/markets", params=params)
         return data.get("markets", [])
 
     async def get_market(self, ticker: str) -> dict:
@@ -133,17 +137,22 @@ class SpeedClient:
 
     async def get_all_markets_for_events(self,
                                           event_tickers: list[str],
-                                          concurrency: int = 10) -> dict[str, list[dict]]:
+                                          concurrency: int = 10,
+                                          market_status: str | None = "open",
+                                          ) -> dict[str, list[dict]]:
         """
         Fetch all bucket markets for all events concurrently.
         Returns {event_ticker: [market, ...]}
-        concurrency=10 for hot path; pass lower value for backfill/research.
+
+        market_status="open"  — live markets only (default, hot path)
+        market_status=None    — all statuses (backfill / historical research)
+        concurrency=10 for hot path; pass lower value for backfill.
         """
-        sem   = asyncio.Semaphore(concurrency)
+        sem = asyncio.Semaphore(concurrency)
 
         async def _fetch(et: str):
             async with sem:
-                return await self.get_markets_for_event(et)
+                return await self.get_markets_for_event(et, status=market_status)
 
         tasks = [_fetch(et) for et in event_tickers]
         results = await asyncio.gather(*tasks, return_exceptions=True)
