@@ -79,13 +79,19 @@ class SpeedClient:
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 
-    async def _get(self, path: str, params: dict | None = None) -> dict:
+    async def _get(self, path: str, params: dict | None = None,
+                   _retry: int = 3) -> dict:
         full_path = f"{_PREFIX}{path}"
-        headers   = _auth_headers("GET", full_path)
-        async with self._session.get(full_path, headers=headers,
-                                     params=params) as r:
-            r.raise_for_status()
-            return await r.json()
+        for attempt in range(_retry):
+            headers = _auth_headers("GET", full_path)
+            async with self._session.get(full_path, headers=headers,
+                                         params=params) as r:
+                if r.status == 429 and attempt < _retry - 1:
+                    await asyncio.sleep(1.5 * (attempt + 1))
+                    continue
+                r.raise_for_status()
+                return await r.json()
+        raise RuntimeError(f"_get {path} failed after {_retry} attempts")
 
     async def _post(self, path: str, body: dict) -> dict:
         full_path = f"{_PREFIX}{path}"
@@ -121,12 +127,20 @@ class SpeedClient:
         return data.get("market", data)
 
     async def get_all_markets_for_events(self,
-                                          event_tickers: list[str]) -> dict[str, list[dict]]:
+                                          event_tickers: list[str],
+                                          concurrency: int = 10) -> dict[str, list[dict]]:
         """
         Fetch all bucket markets for all events concurrently.
         Returns {event_ticker: [market, ...]}
+        concurrency=10 for hot path; pass lower value for backfill/research.
         """
-        tasks = [self.get_markets_for_event(et) for et in event_tickers]
+        sem   = asyncio.Semaphore(concurrency)
+
+        async def _fetch(et: str):
+            async with sem:
+                return await self.get_markets_for_event(et)
+
+        tasks = [_fetch(et) for et in event_tickers]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         out = {}
         for et, res in zip(event_tickers, results):

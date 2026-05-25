@@ -228,16 +228,18 @@ async def run_research_backfill(days: int = 7) -> dict:
     errors   = []
 
     async with SpeedClient() as client:
+        # Throttle backfill to 5 concurrent series to avoid 429 rate limits.
+        # This is a background operation — taking a few extra seconds is fine.
+        _sem = asyncio.Semaphore(5)
 
         async def _fetch_settled(series_ticker: str):
-            try:
-                # Fetch settled events (historical)
-                events = await client.list_events(series_ticker, status="settled")
-                # Also fetch open (today/upcoming) events
-                open_ev = await client.list_events(series_ticker, status="open")
-                return series_ticker, events + open_ev
-            except Exception as e:
-                return series_ticker, e
+            async with _sem:
+                try:
+                    events  = await client.list_events(series_ticker, status="settled")
+                    open_ev = await client.list_events(series_ticker, status="open")
+                    return series_ticker, events + open_ev
+                except Exception as e:
+                    return series_ticker, e
 
         tasks   = [_fetch_settled(s[0]) for s in series_list]
         results = await asyncio.gather(*tasks)
@@ -258,7 +260,8 @@ async def run_research_backfill(days: int = 7) -> dict:
                 continue
 
             event_tickers = [e.get("event_ticker", "") for e in events]
-            market_map    = await client.get_all_markets_for_events(event_tickers)
+            market_map    = await client.get_all_markets_for_events(
+                event_tickers, concurrency=3)   # throttle backfill fetches
 
             for evt in events:
                 et      = evt.get("event_ticker", "")
