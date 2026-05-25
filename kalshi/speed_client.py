@@ -163,21 +163,31 @@ class SpeedClient:
                              max_no_cents: int = 70,
                              min_no_cents: int = 50,
                              only_zero_oi: bool = True,
-                             dry_run: bool = True) -> list[dict]:
+                             dry_run: bool = True,
+                             batch_size: int = 30,
+                             batch_concurrency: int = 3) -> list[dict]:
         """
-        Place NO bids on all qualifying markets via ONE batch POST request.
-        Primary execution path — called at market open via WS trigger.
+        Place NO bids on all qualifying markets using chunked batch POSTs.
 
-        markets dicts must have:
-          ticker (str), no_ask_cents (int), open_interest (float)
+        Why chunked:
+          ~192 orders possible (32 series × 6 buckets).
+          Kalshi's batch endpoint limit is ~30 orders per request.
+          Token bucket: 10 tokens/order — a single 192-order payload would
+          exhaust the bucket instantly.
 
+          Strategy (from Kalshi API docs):
+            batch_size=30  → chunk qualifying orders into groups of 30
+            batch_concurrency=3 → fire up to 3 chunks simultaneously
+            192 orders → 7 chunks → ceil(7/3)=3 HTTP rounds → ~3× RTT total
+
+        markets dicts must have: ticker (str), no_ask_cents (int), open_interest (float)
         Returns same result format as bid_no_all() for DB compatibility.
         """
         import uuid
         t0 = time.perf_counter()
 
-        results:   list[dict] = []
-        to_place:  list[dict] = []   # result dicts that passed qualification
+        results:  list[dict] = []
+        to_place: list[dict] = []   # result dicts that passed qualification
 
         for m in markets:
             ticker   = m.get("ticker", "")
@@ -206,9 +216,9 @@ class SpeedClient:
             elif dry_run:
                 r["placed"]    = True
                 r["order_id"]  = "DRY_RUN"
-                to_place.append(r)   # track for timing stamp
+                to_place.append(r)
             else:
-                to_place.append(r)   # qualifying live order
+                to_place.append(r)
 
         # Stamp dry-run timing and return early
         if dry_run:
@@ -220,49 +230,86 @@ class SpeedClient:
         if not to_place:
             return results
 
-        # ── Build and fire single batch POST ──────────────────────────────────
+        # ── Assign client_order_ids and build chunk payloads ──────────────────
         cid_map: dict[str, dict] = {}
-        batch_orders = []
+        order_list = []
         for r in to_place:
             cid = f"spd-{uuid.uuid4().hex[:8]}"
             cid_map[cid] = r
-            batch_orders.append({
+            order_list.append({
                 "ticker":          r["ticker"],
                 "side":            "no",
                 "action":          "buy",
                 "count":           contracts,
-                "no_price":        r["no_ask_cents"],   # integer cents (V1 format)
+                "no_price":        r["no_ask_cents"],   # integer cents (V1)
                 "client_order_id": cid,
                 "time_in_force":   "good_till_canceled",
             })
 
-        try:
-            resp     = await self._post("/portfolio/orders/batched",
-                                        {"orders": batch_orders})
-            ms_batch = round((time.perf_counter() - t0) * 1000)
-            print(f"[speed] batch POST complete in {ms_batch}ms "
-                  f"({len(batch_orders)} orders)")
+        # Split into chunks of batch_size
+        chunks = [
+            order_list[i : i + batch_size]
+            for i in range(0, len(order_list), batch_size)
+        ]
+        n_chunks = len(chunks)
+        print(f"[speed] firing {len(to_place)} orders across "
+              f"{n_chunks} chunks (size≤{batch_size}, concurrency={batch_concurrency})")
 
+        # ── Send chunks with controlled concurrency ───────────────────────────
+        sem = asyncio.Semaphore(batch_concurrency)
+
+        async def _post_chunk(chunk: list[dict], chunk_idx: int):
+            async with sem:
+                t1   = time.perf_counter()
+                resp = await self._post("/portfolio/orders/batched",
+                                        {"orders": chunk})
+                ms   = round((time.perf_counter() - t1) * 1000)
+                print(f"[speed] chunk {chunk_idx+1}/{n_chunks} "
+                      f"({len(chunk)} orders) → {ms}ms")
+                return resp, ms
+
+        chunk_tasks = [
+            _post_chunk(chunk, idx) for idx, chunk in enumerate(chunks)
+        ]
+
+        responses = await asyncio.gather(*chunk_tasks, return_exceptions=True)
+        ms_total  = round((time.perf_counter() - t0) * 1000)
+
+        # ── Parse all responses back to result dicts ──────────────────────────
+        for resp_or_exc in responses:
+            if isinstance(resp_or_exc, Exception):
+                # Whole chunk failed — mark its orders as errored
+                # We can't know which chunk failed, so mark all unresolved
+                print(f"[speed] chunk error: {resp_or_exc}")
+                for r in to_place:
+                    if r["ms_elapsed"] is None:
+                        r["error"]      = str(resp_or_exc)
+                        r["ms_elapsed"] = ms_total
+                continue
+
+            resp, ms_chunk = resp_or_exc
             for item in resp.get("orders", []):
                 r = cid_map.get(item.get("client_order_id", ""))
                 if not r:
                     continue
                 if item.get("error"):
                     r["error"]      = str(item["error"])
-                    r["ms_elapsed"] = ms_batch
+                    r["ms_elapsed"] = ms_chunk
                 else:
                     ord_obj         = item.get("order", {})
                     r["placed"]     = True
                     r["order_id"]   = ord_obj.get("order_id") or ord_obj.get("id")
-                    r["ms_elapsed"] = ms_batch
+                    r["ms_elapsed"] = ms_chunk
 
-        except Exception as e:
-            ms_err = round((time.perf_counter() - t0) * 1000)
-            print(f"[speed] batch POST error after {ms_err}ms: {e}")
-            for r in to_place:
-                r["error"]      = str(e)
-                r["ms_elapsed"] = ms_err
+        # Catch any orders that got no response at all
+        for r in to_place:
+            if r["ms_elapsed"] is None:
+                r["error"]      = "no response"
+                r["ms_elapsed"] = ms_total
 
+        placed = sum(1 for r in to_place if r["placed"])
+        print(f"[speed] batch complete — {placed}/{len(to_place)} placed "
+              f"in {ms_total}ms total")
         return results
 
     async def bid_no_all(self, markets: list[dict], contracts: int = 1,

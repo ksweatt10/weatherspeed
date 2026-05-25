@@ -45,12 +45,14 @@ async def run_bids(ws_state: dict | None = None) -> None:
               Pass None to fall back to REST market fetch.
     """
     today     = _today_et()
-    dry_run   = runtime_config.get("dry_run",               True)
-    contracts = runtime_config.get("contracts_per_market",  1)
-    max_no    = runtime_config.get("max_no_price_cents",     70)
-    min_no    = runtime_config.get("min_no_price_cents",     50)
-    only_zero = runtime_config.get("bid_only_zero_oi",       True)
-    auto_bid  = runtime_config.get("auto_bid_enabled",       True)
+    dry_run      = runtime_config.get("dry_run",               True)
+    contracts    = runtime_config.get("contracts_per_market",  1)
+    max_no       = runtime_config.get("max_no_price_cents",     70)
+    min_no       = runtime_config.get("min_no_price_cents",     50)
+    only_zero    = runtime_config.get("bid_only_zero_oi",       True)
+    auto_bid     = runtime_config.get("auto_bid_enabled",       True)
+    batch_size   = runtime_config.get("batch_size",             30)
+    batch_conc   = runtime_config.get("batch_concurrency",       3)
 
     if not auto_bid:
         print("[bidder] auto_bid_enabled=False — skipping")
@@ -145,11 +147,13 @@ async def run_bids(ws_state: dict | None = None) -> None:
         t_bid = time.perf_counter()
         results = await client.batch_no_bids(
             live_markets,
-            contracts    = contracts,
-            max_no_cents = max_no,
-            min_no_cents = min_no,
-            only_zero_oi = only_zero,
-            dry_run      = dry_run,
+            contracts         = contracts,
+            max_no_cents      = max_no,
+            min_no_cents      = min_no,
+            only_zero_oi      = only_zero,
+            dry_run           = dry_run,
+            batch_size        = batch_size,
+            batch_concurrency = batch_conc,
         )
         ms_bid = round((time.perf_counter() - t_bid) * 1000)
 

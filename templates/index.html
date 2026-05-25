@@ -621,6 +621,8 @@ const SETTING_META = {
   contracts_per_market:       { label: "Contracts / Market",    desc: "Number of contracts to bid per bucket",              type: "int",  min: 1, max: 100 },
   max_no_price_cents:         { label: "Max NO Price (¢)",      desc: "Skip if NO ask is above this price in cents",        type: "int",  min: 1, max: 99  },
   min_no_price_cents:         { label: "Min NO Price (¢)",      desc: "Skip if NO ask is below this price in cents",        type: "int",  min: 1, max: 99  },
+  batch_size:                 { label: "Batch Size",             desc: "Orders per batch POST request (Kalshi limit ~30)",   type: "int",  min: 1, max: 30  },
+  batch_concurrency:          { label: "Batch Concurrency",      desc: "Max simultaneous batch requests in flight (1–3)",    type: "int",  min: 1, max: 5   },
   creation_poll_interval_secs:{ label: "Poll Interval (sec)",   desc: "Seconds between creation-watch polls",               type: "int",  min: 1, max: 60  },
   creation_poll_start_utc_hour:  { label: "Watch Start Hour (UTC)",   desc: "UTC hour to begin creation polling",           type: "int",  min: 0, max: 23  },
   creation_poll_start_utc_minute:{ label: "Watch Start Min (UTC)",    desc: "UTC minute to begin creation polling",         type: "int",  min: 0, max: 59  },
