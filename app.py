@@ -139,19 +139,22 @@ def api_settings():
 @app.post("/api/settings")
 def api_settings_post():
     data = request.get_json() or {}
-    bool_keys = {"dry_run", "auto_bid_enabled", "bid_only_zero_oi",
-                 "track_market_timing"}
-    int_keys  = {"contracts_per_market", "max_no_price_cents",
-                 "min_no_price_cents", "creation_poll_interval_secs",
-                 "creation_poll_start_utc_hour",
-                 "creation_poll_start_utc_minute",
-                 "open_time_utc_hour", "open_time_utc_minute",
-                 "batch_size", "batch_concurrency", "batch_inter_round_ms"}
+    bool_keys  = {"dry_run", "auto_bid_enabled", "bid_only_zero_oi",
+                  "track_market_timing"}
+    int_keys   = {"contracts_per_market", "max_no_price_cents",
+                  "min_no_price_cents", "creation_poll_interval_secs",
+                  "creation_poll_start_utc_hour",
+                  "creation_poll_start_utc_minute",
+                  "open_time_utc_hour", "open_time_utc_minute",
+                  "batch_size", "batch_concurrency", "batch_inter_round_ms"}
+    float_keys = {"dollars_per_bucket"}
     for k, v in data.items():
         if k in bool_keys:
             runtime_config.set(k, bool(v))
         elif k in int_keys:
             runtime_config.set(k, int(v))
+        elif k in float_keys:
+            runtime_config.set(k, float(v))
         else:
             runtime_config.set(k, v)
     return jsonify({"ok": True, "settings": runtime_config.all_settings()})

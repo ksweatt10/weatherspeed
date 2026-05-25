@@ -277,14 +277,18 @@ class SpeedClient:
         to_place: list[dict] = []   # result dicts that passed qualification
 
         for m in markets:
-            ticker   = m.get("ticker", "")
-            no_cents = int(m.get("no_ask_cents", 0))
-            oi       = float(m.get("open_interest") or 0)
+            ticker    = m.get("ticker", "")
+            no_cents  = int(m.get("no_ask_cents", 0))
+            oi        = float(m.get("open_interest") or 0)
+            # Per-market contract count (set by speed_bidder from dollars_per_bucket);
+            # falls back to the global `contracts` parameter.
+            mkt_contracts = int(m.get("contracts", contracts))
 
             r = {
                 "ticker":        ticker,
                 "no_ask_cents":  no_cents,
                 "open_interest": oi,
+                "contracts":     mkt_contracts,
                 "placed":        False,
                 "dry_run":       dry_run,
                 "order_id":      None,
@@ -327,7 +331,7 @@ class SpeedClient:
                 "ticker":          r["ticker"],
                 "side":            "no",
                 "action":          "buy",
-                "count":           contracts,
+                "count":           r["contracts"],      # per-market count
                 "no_price":        r["no_ask_cents"],   # integer cents (V1)
                 "client_order_id": cid,
                 "time_in_force":   "good_till_canceled",

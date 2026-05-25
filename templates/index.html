@@ -332,6 +332,18 @@ input:checked+.slider:before{transform:translateX(18px)}
     Settings are reset to defaults if the service restarts.
   </p>
   <div class="sg" id="settings-grid"></div>
+
+  <div style="margin-top:20px">
+    <div class="sh" style="margin-bottom:10px">
+      <h2>Exposure Calculator</h2>
+      <span style="color:var(--muted);font-size:11px">Updates on Save — based on avg of min/max NO price range</span>
+    </div>
+    <div id="exposure-calc"
+         style="background:var(--surface);border:1px solid var(--border);border-radius:8px;
+                padding:14px 16px;font-size:13px;line-height:1.8;color:var(--text)">
+      Save settings to calculate exposure.
+    </div>
+  </div>
 </div>
 
 </main>
@@ -689,21 +701,27 @@ function renderFirstTradesTable(rows) {
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 const SMETA = {
-  dry_run:             {l:"Dry Run",            d:"Simulate bids — never place real orders",                 t:"bool"},
-  auto_bid_enabled:    {l:"Auto-Bid Enabled",   d:"Fire bids automatically at market open (14:00 UTC)",      t:"bool"},
-  bid_only_zero_oi:    {l:"First-Only Mode",    d:"Only bid when open interest = 0 (you are first in)",      t:"bool"},
-  track_market_timing: {l:"Track Timing",       d:"Record market creation + open times to DB",               t:"bool"},
-  contracts_per_market:{l:"Contracts / Market", d:"Number of NO contracts per bucket",                       t:"int", min:1, max:100},
-  max_no_price_cents:  {l:"Max NO Price (¢)",   d:"Skip if NO ask > this cents (70 = 70¢)",                  t:"int", min:1, max:99},
-  min_no_price_cents:  {l:"Min NO Price (¢)",   d:"Skip if NO ask < this cents",                             t:"int", min:1, max:99},
-  batch_size:          {l:"Batch Size",         d:"Orders per batch POST (Kalshi limit ≈30; 192÷30=7 chunks)",t:"int", min:1, max:30},
-  batch_concurrency:   {l:"Batch Concurrency",  d:"Simultaneous batch requests in flight (1–3 recommended)", t:"int", min:1, max:5},
-  batch_inter_round_ms:{l:"Inter-Round Delay",  d:"ms to sleep between rounds of chunks (0=RTT only; try 100–200 if 429s occur live)", t:"int", min:0, max:2000},
-  creation_poll_interval_secs:{l:"Poll Interval (s)",d:"Seconds between creation-watch REST polls",          t:"int", min:1, max:60},
-  creation_poll_start_utc_hour:  {l:"Watch Start Hour",  d:"UTC hour to begin creation polling (default 9)", t:"int", min:0, max:23},
-  creation_poll_start_utc_minute:{l:"Watch Start Min",   d:"UTC minute to begin polling (default 28)",       t:"int", min:0, max:59},
-  open_time_utc_hour:  {l:"Open Trigger Hour",  d:"UTC hour for timer fallback trigger (default 14)",        t:"int", min:0, max:23},
-  open_time_utc_minute:{l:"Open Trigger Min",   d:"UTC minute for timer fallback (fires at +5s)",            t:"int", min:0, max:59},
+  // ── Mode ──────────────────────────────────────────────────────────────────
+  dry_run:             {l:"Dry Run",            d:"Simulate bids — evaluate and log, but never place real orders",       t:"bool"},
+  auto_bid_enabled:    {l:"Auto-Bid Enabled",   d:"Fire bids automatically when the market opens at 14:00 UTC",          t:"bool"},
+  bid_only_zero_oi:    {l:"First-Only Mode",    d:"Only bid when open interest = 0 on that bucket (you are first in)",   t:"bool"},
+  track_market_timing: {l:"Track Timing",       d:"Record market creation + open times to the research DB",              t:"bool"},
+  // ── Position sizing ───────────────────────────────────────────────────────
+  dollars_per_bucket:  {l:"$ Per Bucket",       d:"Target dollars at risk per bucket — engine calculates contracts as round($ ÷ NO price). E.g. $5 at 52¢ = 10 contracts. Set to 0 to use Contracts/Market instead.", t:"float", min:0, max:10000, step:0.5},
+  contracts_per_market:{l:"Contracts / Market", d:"Fixed contracts per bucket — used only when $ Per Bucket = 0. Each NO contract pays $1 if NO wins; you pay the NO ask price upfront (e.g. 52¢ × 5 = $2.60 at risk).", t:"int", min:1, max:500},
+  // ── Price filter ──────────────────────────────────────────────────────────
+  max_no_price_cents:  {l:"Max NO Price (¢)",   d:"Skip buckets where NO ask is above this. 70¢ NO = 30¢ YES implied probability. Higher = more risk, higher payout.", t:"int", min:1, max:99},
+  min_no_price_cents:  {l:"Min NO Price (¢)",   d:"Skip buckets where NO ask is below this. Very cheap NO = market is very confident about outcome.", t:"int", min:1, max:99},
+  // ── Batch engine ──────────────────────────────────────────────────────────
+  batch_size:          {l:"Batch Size",         d:"Orders per batch POST chunk (Kalshi limit ≈30). 192 orders ÷ 30 = 7 chunks.", t:"int", min:1, max:30},
+  batch_concurrency:   {l:"Batch Concurrency",  d:"Simultaneous chunk POSTs per round. 3 chunks × ~47ms RTT ≈ 141ms for all orders.", t:"int", min:1, max:5},
+  batch_inter_round_ms:{l:"Inter-Round Delay",  d:"Extra ms sleep between rounds (0 = RTT-only). Only needed if 429s appear at open.", t:"int", min:0, max:2000},
+  // ── Timing ────────────────────────────────────────────────────────────────
+  creation_poll_interval_secs:{l:"Poll Interval (s)",d:"Seconds between creation-watch polls (09:28–09:31 UTC window)", t:"int", min:1, max:60},
+  creation_poll_start_utc_hour:  {l:"Watch Start Hour",  d:"UTC hour to begin creation polling (default 9 = 9 UTC)", t:"int", min:0, max:23},
+  creation_poll_start_utc_minute:{l:"Watch Start Min",   d:"UTC minute to begin polling (default 28)",               t:"int", min:0, max:59},
+  open_time_utc_hour:  {l:"Open Trigger Hour",  d:"UTC hour for timer fallback (default 14 = 10am ET)",  t:"int", min:0, max:23},
+  open_time_utc_minute:{l:"Open Trigger Min",   d:"UTC minute for timer fallback (fires at +5s safety)", t:"int", min:0, max:59},
 };
 
 async function loadSettings() {
@@ -712,11 +730,18 @@ async function loadSettings() {
     const grid = document.getElementById("settings-grid");
     grid.innerHTML = Object.entries(SMETA).map(([k,m]) => {
       const v = s[k];
-      const ctrl = m.t==="bool"
-        ? `<label class="toggle"><input type="checkbox" id="s_${k}" ${v?"checked":""}><span class="slider"></span></label>`
-        : `<input class="ni" type="number" id="s_${k}" value="${v??""}" min="${m.min||0}" max="${m.max||9999}">`;
+      let ctrl;
+      if (m.t === "bool") {
+        ctrl = `<label class="toggle"><input type="checkbox" id="s_${k}" ${v?"checked":""}><span class="slider"></span></label>`;
+      } else if (m.t === "float") {
+        ctrl = `<input class="ni" type="number" id="s_${k}" value="${v??0}" min="${m.min||0}" max="${m.max||9999}" step="${m.step||0.5}" style="width:85px">`;
+      } else {
+        ctrl = `<input class="ni" type="number" id="s_${k}" value="${v??""}" min="${m.min||0}" max="${m.max||9999}">`;
+      }
       return `<div class="sr"><div class="meta"><div class="name">${m.l}</div><div class="desc">${m.d}</div></div>${ctrl}</div>`;
     }).join("");
+    // Render exposure calculator after fields are rendered
+    updateExposureCalc(s);
   } catch(e) { toast("Settings load failed","err"); }
 }
 
@@ -725,12 +750,62 @@ async function saveSettings() {
   for(const [k,m] of Object.entries(SMETA)) {
     const el = document.getElementById("s_"+k);
     if (!el) continue;
-    p[k] = m.t==="bool" ? el.checked : parseInt(el.value,10);
+    if (m.t === "bool")        p[k] = el.checked;
+    else if (m.t === "float")  p[k] = parseFloat(el.value) || 0;
+    else                       p[k] = parseInt(el.value, 10);
   }
   try {
     await api("/api/settings", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(p)});
     toast("Settings saved ✓","ok");
+    updateExposureCalc(p);
   } catch(e) { toast("Save failed: "+e.message,"err"); }
+}
+
+function updateExposureCalc(s) {
+  const el = document.getElementById("exposure-calc");
+  if (!el) return;
+
+  const dollars    = parseFloat(s.dollars_per_bucket) || 0;
+  const contracts  = parseInt(s.contracts_per_market) || 1;
+  const minC       = parseInt(s.min_no_price_cents)   || 50;
+  const maxC       = parseInt(s.max_no_price_cents)   || 70;
+  const avgC       = (minC + maxC) / 2;             // midpoint of qualifying range
+  const buckets    = 192;                           // typical qualifying bucket count at open
+
+  let rows = [];
+
+  if (dollars > 0) {
+    const contractsAtAvg  = Math.round(dollars / (avgC / 100));
+    const costPerBucket   = contractsAtAvg * (avgC / 100);
+    const totalAll        = costPerBucket * buckets;
+    const totalHalf       = costPerBucket * Math.round(buckets / 2);
+    rows = [
+      `<strong>Mode: $ Per Bucket = $${dollars.toFixed(2)}</strong>`,
+      `Avg NO price ${avgC}¢ → <strong>${contractsAtAvg} contracts</strong> per bucket`,
+      `Cost per bucket: ${contractsAtAvg} × $${(avgC/100).toFixed(2)} = <strong>$${costPerBucket.toFixed(2)}</strong>`,
+      ``,
+      `If all ${buckets} buckets qualify (OI=0):  <strong style="color:var(--red)">$${totalAll.toFixed(2)}</strong> total outlay`,
+      `If ~half qualify (${Math.round(buckets/2)} buckets):  <strong style="color:var(--yellow)">$${totalHalf.toFixed(2)}</strong> total outlay`,
+      ``,
+      `<span style="color:var(--muted)">Payout per bucket if NO wins: ${contractsAtAvg} × $1.00 = $${contractsAtAvg.toFixed(2)}</span>`,
+    ];
+  } else {
+    const costPerBucket = contracts * (avgC / 100);
+    const totalAll      = costPerBucket * buckets;
+    const totalHalf     = costPerBucket * Math.round(buckets / 2);
+    rows = [
+      `<strong>Mode: Fixed ${contracts} contract${contracts!==1?"s":""} per bucket</strong>`,
+      `At avg ${avgC}¢ NO price: ${contracts} × $${(avgC/100).toFixed(2)} = <strong>$${costPerBucket.toFixed(2)}</strong> per bucket`,
+      ``,
+      `If all ${buckets} buckets qualify:  <strong style="color:var(--red)">$${totalAll.toFixed(2)}</strong> total outlay`,
+      `If ~half qualify (${Math.round(buckets/2)} buckets):  <strong style="color:var(--yellow)">$${totalHalf.toFixed(2)}</strong> total outlay`,
+      ``,
+      `<span style="color:var(--muted)">Payout per bucket if NO wins: ${contracts} × $1.00 = $${contracts.toFixed(2)}</span>`,
+      `<span style="color:var(--muted)">To use $ Per Bucket instead, set "$ Per Bucket" above 0</span>`,
+    ];
+  }
+
+  el.innerHTML = rows.map(r => r === "" ? "<br>" : `<div>${r}</div>`).join("");
 }
 
 // ── Trigger actions ───────────────────────────────────────────────────────────

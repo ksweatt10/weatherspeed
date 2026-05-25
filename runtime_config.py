@@ -11,7 +11,8 @@ _defaults: dict = {
     "dry_run":              True,    # True = evaluate only, never place real orders
     "auto_bid_enabled":     True,    # actually fire orders at market open
     "bid_only_zero_oi":     True,    # only bid when open_interest == 0
-    "contracts_per_market": 1,       # how many NO contracts per market
+    "dollars_per_bucket":   0.0,     # $ to risk per bucket (0 = use contracts_per_market)
+    "contracts_per_market": 1,       # fallback: fixed contracts if dollars_per_bucket=0
     "max_no_price_cents":   70,      # skip NO bids above this price (cents)
     "min_no_price_cents":   50,      # skip NO bids below this price (too risky)
     "batch_size":           30,      # orders per batch POST (Kalshi limit ~30)
