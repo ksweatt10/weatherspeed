@@ -115,23 +115,31 @@ async def run_bids(ws_state: dict | None = None) -> None:
                   f"in {ms_to_fetch}ms")
 
         else:
-            # ── REST fallback: concurrent GET per ticker ──────────────────────
-            print(f"[bidder] WS state unavailable — falling back to REST fetch")
-            tickers     = [m.get("ticker", "") for _, m in all_markets]
-            fresh_tasks = [client.get_market(t) for t in tickers]
-            fresh       = await asyncio.gather(*fresh_tasks, return_exceptions=True)
+            # ── REST fallback: one GET per event (33 calls, not 192) ──────────
+            # get_all_markets_for_events fetches every event concurrently but
+            # capped at concurrency=5 — each call returns all 6 buckets,
+            # so 33 requests replace 192 and stay well under the token bucket.
+            print(f"[bidder] WS state unavailable — falling back to REST fetch "
+                  f"({len(discovered)} events, concurrency=5)")
+
+            fresh_map = await client.get_all_markets_for_events(
+                list(discovered.keys()), concurrency=5, market_status="open"
+            )
+
+            # Build ticker → market dict for O(1) lookup
+            ticker_data: dict = {
+                m.get("ticker", ""): m
+                for mkts in fresh_map.values()
+                for m in mkts
+            }
 
             live_markets = []
-            for (et, m), result in zip(all_markets, fresh):
-                ticker = m.get("ticker", "")
-                if isinstance(result, Exception):
-                    print(f"[bidder] REST fetch error {ticker}: {result}")
-                    no_cents = 0
-                    oi       = 0.0
-                else:
-                    no_ask_d = result.get("no_ask_dollars")
-                    no_cents = round(float(no_ask_d) * 100) if no_ask_d else 0
-                    oi       = float(result.get("open_interest_fp") or 0)
+            for et, m in all_markets:
+                ticker   = m.get("ticker", "")
+                result   = ticker_data.get(ticker, {})
+                no_ask_d = result.get("no_ask_dollars")
+                no_cents = round(float(no_ask_d) * 100) if no_ask_d else 0
+                oi       = float(result.get("open_interest_fp") or 0)
                 live_markets.append({
                     "ticker":        ticker,
                     "no_ask_cents":  no_cents,
@@ -139,7 +147,9 @@ async def run_bids(ws_state: dict | None = None) -> None:
                 })
 
             ms_to_fetch = round((time.perf_counter() - t_fetch_start) * 1000)
-            print(f"[bidder] REST fetch {total} markets in {ms_to_fetch}ms")
+            priced = sum(1 for m in live_markets if ticker_data.get(m["ticker"]))
+            print(f"[bidder] REST fetch {len(discovered)} events → "
+                  f"{priced}/{total} tickers priced in {ms_to_fetch}ms")
 
         # ── Compute per-market contract counts ───────────────────────────────
         # If dollars_per_bucket > 0: derive contracts from actual live price.
