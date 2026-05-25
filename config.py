@@ -21,38 +21,78 @@ PORT = int(os.getenv("PORT", 8002))
 # Sorted Z→A by city name for bid ordering.
 WEATHER_SERIES = [
     # (series_ticker, city_display_name, kind)
-    ("KXHIGHWDC",  "Washington DC",  "high"),
-    ("KXLOWTWDC",  "Washington DC",  "low"),
-    ("KXHIGHSEA",  "Seattle",        "high"),
-    ("KXLOWTSEA",  "Seattle",        "low"),
-    ("KXHIGHSFO",  "San Francisco",  "high"),
-    ("KXLOWTSFO",  "San Francisco",  "low"),
-    ("KXHIGHSAT",  "San Antonio",    "high"),
-    ("KXLOWTSAT",  "San Antonio",    "low"),
-    ("KXHIGHPHL",  "Philadelphia",   "high"),
-    ("KXHIGHPHX",  "Phoenix",        "high"),
-    ("KXLOWTPHX",  "Phoenix",        "low"),
-    ("KXHIGHMSP",  "Minneapolis",    "high"),
-    ("KXHIGHMSQ",  "Miami",          "high"),
-    ("KXLOWTMSQ",  "Miami",          "low"),
-    ("KXHIGHLAX",  "Los Angeles",    "high"),
-    ("KXHIGHLAS",  "Las Vegas",      "high"),
-    ("KXHIGHIAH",  "Houston",        "high"),
-    ("KXLOWTIAH",  "Houston",        "low"),
-    ("KXHIGHDAL",  "Dallas",         "high"),
-    ("KXLOWTDAL",  "Dallas",         "low"),
-    ("KXHIGHDEN",  "Denver",         "high"),
-    ("KXLOWTDEN",  "Denver",         "low"),
-    ("KXHIGHCHI",  "Chicago",        "high"),
-    ("KXLOWTCHI",  "Chicago",        "low"),
+    # All tickers verified live against Kalshi API — 33 active series.
+    # Naming is inconsistent on Kalshi's side: some HIGH use KXHIGHT-prefix,
+    # some use KXHIGH-prefix; LOW always uses KXLOWT-prefix.
+
+    # Atlanta
+    ("KXHIGHTATL", "Atlanta",        "high"),
+    ("KXLOWTATL",  "Atlanta",        "low"),
+
+    # Austin
     ("KXHIGHAUS",  "Austin",         "high"),
     ("KXLOWTAUS",  "Austin",         "low"),
-    ("KXHIGHTATL", "Atlanta",        "high"),
-    ("KXHIGHBOS",  "Boston",         "high"),
-    ("KXHIGHNYC",  "New York City",  "high"),
-    ("KXLOWTNYC",  "New York City",  "low"),
-    ("KXHIGHMSY",  "New Orleans",    "high"),
-    ("KXHIGHOKC",  "Oklahoma City",  "high"),
+
+    # Boston
+    ("KXHIGHTBOS", "Boston",         "high"),
+    ("KXLOWTBOS",  "Boston",         "low"),
+
+    # Chicago
+    ("KXHIGHCHI",  "Chicago",        "high"),
+    ("KXLOWTCHI",  "Chicago",        "low"),
+
+    # Dallas
+    ("KXHIGHTDAL", "Dallas",         "high"),
+    ("KXLOWTDAL",  "Dallas",         "low"),
+
+    # Denver
+    ("KXHIGHDEN",  "Denver",         "high"),
+    ("KXLOWTDEN",  "Denver",         "low"),
+
+    # Houston
+    ("KXHIGHTHOU", "Houston",        "high"),
+    ("KXLOWTHOU",  "Houston",        "low"),
+
+    # Las Vegas
+    ("KXHIGHTLV",  "Las Vegas",      "high"),
+    ("KXLOWTLV",   "Las Vegas",      "low"),
+
+    # Los Angeles
+    ("KXHIGHLAX",  "Los Angeles",    "high"),
+    ("KXLOWTLAX",  "Los Angeles",    "low"),
+
+    # Miami
+    ("KXLOWTMIA",  "Miami",          "low"),   # no high-temp series on Kalshi
+
+    # Minneapolis
+    ("KXHIGHTMIN", "Minneapolis",    "high"),
+    ("KXLOWTMIN",  "Minneapolis",    "low"),
+
+    # New Orleans
+    ("KXHIGHTNOLA","New Orleans",    "high"),
+    ("KXLOWTNOLA", "New Orleans",    "low"),
+
+    # New York City
+    ("KXLOWTNYC",  "New York City",  "low"),   # no high-temp series on Kalshi
+
+    # Oklahoma City
+    ("KXHIGHTOKC", "Oklahoma City",  "high"),
+    ("KXLOWTOKC",  "Oklahoma City",  "low"),
+
+    # Philadelphia
+    ("KXLOWTPHIL", "Philadelphia",   "low"),   # no high-temp series on Kalshi
+
+    # Phoenix
+    ("KXHIGHTPHX", "Phoenix",        "high"),
+    ("KXLOWTPHX",  "Phoenix",        "low"),
+
+    # San Francisco
+    ("KXHIGHTSFO", "San Francisco",  "high"),
+    ("KXLOWTSFO",  "San Francisco",  "low"),
+
+    # Seattle
+    ("KXHIGHTSEA", "Seattle",        "high"),
+    ("KXLOWTSEA",  "Seattle",        "low"),
 ]
 
 # Z→A sort by city display name (user requirement: bid in Z→A order)
