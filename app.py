@@ -242,10 +242,13 @@ def create_app():
     init_db()
     import scheduler
     scheduler.start()
-    # Auto-backfill research data on startup (non-blocking)
-    import threading, asyncio
+    # Auto-backfill research data on startup (non-blocking).
+    # 60s delay lets the service settle and avoids rate-limit collisions
+    # with any other startup API calls or rapid service restarts.
+    import threading, asyncio, time as _time
     from market_watcher import run_research_backfill
     def _backfill():
+        _time.sleep(60)
         asyncio.run(run_research_backfill(days=7))
     threading.Thread(target=_backfill, name="startup-backfill", daemon=True).start()
     return app
