@@ -13,6 +13,10 @@ from db.models import (init_db, get_bid_history, get_market_timing_history,
 
 app = Flask(__name__)
 
+# ── Balance cache (refresh at most once per 60s) ──────────────────────────────
+import time as _time
+_balance_cache: dict = {"value": None, "ts": 0.0}
+
 
 def _et_date() -> str:
     return (datetime.now(timezone.utc) + timedelta(hours=-4)).date().isoformat()
@@ -95,6 +99,35 @@ def api_research():
     timing = get_market_timing_history(days=60)
     log    = get_session_log(limit=100)
     return jsonify({"timing": timing, "log": log})
+
+
+@app.get("/api/balance")
+def api_balance():
+    """Return Kalshi wallet balance, cached for 60 s."""
+    import asyncio, threading
+    now = _time.monotonic()
+    if now - _balance_cache["ts"] < 60 and _balance_cache["value"] is not None:
+        return jsonify({"balance": _balance_cache["value"], "cached": True})
+
+    result = {"balance": None, "error": None, "cached": False}
+
+    def _fetch():
+        async def _do():
+            from kalshi.speed_client import SpeedClient
+            async with SpeedClient() as client:
+                return await client.get_balance()
+        try:
+            val = asyncio.run(_do())
+            _balance_cache["value"] = val
+            _balance_cache["ts"]    = _time.monotonic()
+            result["balance"] = val
+        except Exception as e:
+            result["error"] = str(e)
+
+    t = threading.Thread(target=_fetch, daemon=True)
+    t.start()
+    t.join(timeout=5)
+    return jsonify(result)
 
 
 @app.get("/api/settings")

@@ -22,7 +22,11 @@ header h1{font-size:15px;font-weight:700;letter-spacing:.5px}
 #dry-badge.live{background:#1c3a1c;color:var(--green)}
 #ws-badge{background:#1c1c3a;color:var(--muted)}
 #ws-badge.connected{background:#1c2a3a;color:var(--accent)}
-#server-ts{margin-left:auto;color:var(--muted);font-size:11px}
+#header-right{margin-left:auto;display:flex;align-items:center;gap:14px;font-size:11px;color:var(--muted);white-space:nowrap}
+#header-balance{color:var(--green);font-weight:700;font-size:12px}
+#header-balance.err{color:var(--red)}
+.hrsep{color:var(--border)}
+#header-utc,#header-et{font-family:monospace;font-size:12px}
 @keyframes pulse{from{opacity:1}to{opacity:.4}}
 
 /* Tabs */
@@ -126,7 +130,13 @@ input:checked+.slider:before{transform:translateX(18px)}
   <span id="phase-badge" class="badge IDLE">IDLE</span>
   <span id="ws-badge" class="badge">WS —</span>
   <span id="dry-badge" class="badge">DRY RUN</span>
-  <span id="server-ts">—</span>
+  <div id="header-right">
+    <span id="header-balance">💰 —</span>
+    <span class="hrsep">|</span>
+    <span id="header-utc">— UTC</span>
+    <span class="hrsep">|</span>
+    <span id="header-et">— ET</span>
+  </div>
 </header>
 
 <nav>
@@ -359,8 +369,7 @@ async function pollState() {
     wb.textContent = wsc ? `WS ✓ ${ws.tickers}t` : "WS ✗";
     wb.className   = wsc ? "badge connected" : "badge";
 
-    document.getElementById("server-ts").textContent =
-      s.server_ts ? "sync " + new Date(s.server_ts * 1000).toISOString().slice(11,19) + " UTC" : "";
+    // server_ts available if needed for debugging
 
     // Overview cards
     document.getElementById("ov-phase").textContent   = s.watch_phase;
@@ -670,6 +679,40 @@ async function triggerTestBatch() {
     panel.textContent = "TEST FAILED: "+e.message;
   }
 }
+
+// ── Clock (ticks every second) ────────────────────────────────────────────────
+function tickClock() {
+  const now = new Date();
+  // UTC
+  const utc = now.toISOString().slice(11, 19);
+  document.getElementById("header-utc").textContent = utc + " UTC";
+  // ET = UTC-4 (EDT) — approximation; close enough for trading display
+  const et = new Date(now.getTime() - 4 * 3600000)
+    .toISOString().slice(11, 19);
+  document.getElementById("header-et").textContent = et + " ET";
+}
+tickClock();
+setInterval(tickClock, 1000);
+
+// ── Balance (fetch on load, then every 60 s) ──────────────────────────────────
+async function pollBalance() {
+  try {
+    const r = await api("/api/balance");
+    const el = document.getElementById("header-balance");
+    if (r.balance !== null && r.balance !== undefined) {
+      el.textContent  = "💰 $" + Number(r.balance).toLocaleString("en-US",
+        {minimumFractionDigits:2, maximumFractionDigits:2});
+      el.className    = "";
+    } else {
+      el.textContent  = "💰 err";
+      el.className    = "err";
+    }
+  } catch(e) {
+    document.getElementById("header-balance").textContent = "💰 —";
+  }
+}
+pollBalance();
+setInterval(pollBalance, 60000);
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 pollState();
