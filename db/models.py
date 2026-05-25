@@ -119,10 +119,21 @@ def upsert_market_timing(event_ticker: str, series_ticker: str, city: str,
 
 
 def _utc_to_et(utc_iso: str) -> str:
-    """Convert UTC ISO string to 'YYYY-MM-DD HH:MM:SS.mmm ET' (EDT = UTC-4)."""
+    """Convert UTC ISO string to 'YYYY-MM-DD HH:MM:SS.mmm ET' (EDT = UTC-4).
+
+    Python 3.10 fromisoformat() requires exactly 0, 3, or 6 fractional digits.
+    Kalshi sometimes returns 5 digits (e.g. .20069), so we normalise to 6.
+    """
+    import re
     from datetime import datetime, timezone, timedelta
     _EDT = timezone(timedelta(hours=-4))
-    dt = datetime.fromisoformat(utc_iso.replace("Z", "+00:00"))
+    # Pad or truncate fractional seconds to exactly 6 digits
+    normalised = re.sub(
+        r'(\d{2}:\d{2}:\d{2})\.(\d+)',
+        lambda m: m.group(1) + "." + m.group(2).ljust(6, "0")[:6],
+        utc_iso,
+    )
+    dt = datetime.fromisoformat(normalised.replace("Z", "+00:00"))
     et = dt.astimezone(_EDT)
     return et.strftime("%Y-%m-%d %H:%M:%S.") + f"{et.microsecond//1000:03d}" + " ET"
 
