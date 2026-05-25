@@ -1,0 +1,14 @@
+[Unit]
+Description=WeatherSpeed Bot (port 8002)
+After=network.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/weatherspeed
+ExecStart=/home/ubuntu/weatherspeed/venv/bin/python app.py
+Restart=always
+RestartSec=5
+EnvironmentFile=/home/ubuntu/weatherspeed/.env
+
+[Install]
+WantedBy=multi-user.target

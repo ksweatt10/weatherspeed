@@ -1,0 +1,717 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>WeatherSpeed Bot</title>
+<style>
+  :root {
+    --bg:      #0d1117;
+    --surface: #161b22;
+    --border:  #30363d;
+    --accent:  #58a6ff;
+    --green:   #3fb950;
+    --yellow:  #d29922;
+    --red:     #f85149;
+    --muted:   #8b949e;
+    --text:    #e6edf3;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", monospace; font-size: 13px; }
+
+  /* ── Header ── */
+  header { display: flex; align-items: center; gap: 16px; padding: 14px 20px; border-bottom: 1px solid var(--border); background: var(--surface); }
+  header h1 { font-size: 16px; font-weight: 600; letter-spacing: .5px; }
+  #phase-badge { padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; letter-spacing: 1px; background: #333; color: var(--muted); }
+  #phase-badge.IDLE     { background: #1f2937; color: var(--muted); }
+  #phase-badge.WATCHING { background: #1c3a1c; color: var(--green); }
+  #phase-badge.READY    { background: #1c3a2c; color: #56d364; }
+  #phase-badge.ARMED    { background: #3a2c1c; color: var(--yellow); }
+  #phase-badge.FIRING   { background: #3a1c1c; color: var(--red); animation: pulse .6s infinite alternate; }
+  #dry-badge { margin-left: auto; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; background: #3a2c1c; color: var(--yellow); }
+  #dry-badge.live { background: #1c3a1c; color: var(--green); }
+  #server-ts { margin-left: 8px; color: var(--muted); font-size: 11px; }
+  @keyframes pulse { from { opacity: 1; } to { opacity: .4; } }
+
+  /* ── Tabs ── */
+  nav { display: flex; gap: 0; border-bottom: 1px solid var(--border); padding: 0 20px; background: var(--surface); }
+  nav button { background: none; border: none; color: var(--muted); padding: 10px 16px; cursor: pointer; font-size: 13px; border-bottom: 2px solid transparent; transition: all .15s; }
+  nav button:hover { color: var(--text); }
+  nav button.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* ── Main ── */
+  main { padding: 20px; }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* ── Cards ── */
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+  .card .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .8px; margin-bottom: 6px; }
+  .card .value { font-size: 24px; font-weight: 700; }
+  .card .sub   { color: var(--muted); font-size: 11px; margin-top: 4px; }
+
+  /* ── Tables ── */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th { background: var(--surface); color: var(--muted); font-weight: 600; text-align: left; padding: 8px 12px; font-size: 11px; text-transform: uppercase; letter-spacing: .6px; border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 1; }
+  td { padding: 7px 12px; border-bottom: 1px solid #1c2128; }
+  tr:hover td { background: #1c2128; }
+  .mono { font-family: monospace; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+  .pill.green  { background: #1c3a1c; color: var(--green); }
+  .pill.yellow { background: #3a2c1c; color: var(--yellow); }
+  .pill.red    { background: #3a1c1c; color: var(--red); }
+  .pill.blue   { background: #1c2a3a; color: var(--accent); }
+  .pill.gray   { background: #222; color: var(--muted); }
+
+  /* ── Section headers ── */
+  .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .section-header h2 { font-size: 14px; font-weight: 600; }
+  .section-header .actions { display: flex; gap: 8px; }
+
+  /* ── Buttons ── */
+  .btn { padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; font-size: 12px; transition: all .15s; }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn.primary { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 600; }
+  .btn.primary:hover { background: #79b8ff; }
+  .btn.danger { border-color: var(--red); color: var(--red); }
+  .btn.danger:hover { background: var(--red); color: #000; }
+
+  /* ── Research chart ── */
+  #creation-chart { width: 100%; height: 200px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 20px; position: relative; overflow: hidden; }
+  #creation-chart canvas { width: 100%; height: 100%; }
+  .chart-label { position: absolute; top: 10px; left: 14px; font-size: 11px; color: var(--muted); }
+  .chart-sublabel { position: absolute; top: 24px; left: 14px; font-size: 10px; color: #555; }
+
+  /* ── Settings form ── */
+  .settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+  .setting-row { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .setting-row .meta { flex: 1; }
+  .setting-row .meta .name { font-weight: 600; font-size: 13px; }
+  .setting-row .meta .desc { color: var(--muted); font-size: 11px; margin-top: 3px; }
+  .toggle { position: relative; display: inline-block; width: 40px; height: 22px; }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .slider { position: absolute; inset: 0; background: #333; border-radius: 22px; cursor: pointer; transition: .2s; }
+  .slider:before { content: ""; position: absolute; height: 16px; width: 16px; left: 3px; bottom: 3px; background: #fff; border-radius: 50%; transition: .2s; }
+  input:checked + .slider { background: var(--accent); }
+  input:checked + .slider:before { transform: translateX(18px); }
+  .num-input { background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 5px 10px; width: 80px; font-size: 13px; text-align: right; }
+  .num-input:focus { outline: none; border-color: var(--accent); }
+
+  /* ── Errors ── */
+  #errors-list { margin-top: 16px; }
+  .err-item { background: #1c1010; border: 1px solid #5a1a1a; border-radius: 6px; padding: 8px 12px; margin-bottom: 6px; font-size: 12px; display: flex; gap: 10px; }
+  .err-item .err-ts { color: var(--muted); flex-shrink: 0; }
+  .err-item .err-msg { color: var(--red); }
+
+  /* ── Log ── */
+  .log-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px; max-height: 300px; overflow-y: auto; }
+  .log-line { font-family: monospace; font-size: 11px; color: var(--muted); padding: 2px 0; border-bottom: 1px solid #1c2128; }
+  .log-line:last-child { border-bottom: none; }
+  .log-line .ts { color: #555; margin-right: 8px; }
+  .log-line .evt { color: var(--accent); margin-right: 6px; }
+
+  /* ── Empty state ── */
+  .empty { text-align: center; padding: 40px; color: var(--muted); font-size: 13px; }
+  .empty .icon { font-size: 32px; margin-bottom: 8px; }
+
+  /* ── Toast ── */
+  #toast { position: fixed; bottom: 24px; right: 24px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 16px; font-size: 13px; opacity: 0; transition: opacity .3s; pointer-events: none; z-index: 999; }
+  #toast.show { opacity: 1; }
+  #toast.ok  { border-color: var(--green); color: var(--green); }
+  #toast.err { border-color: var(--red);   color: var(--red); }
+
+  /* ── Responsive ── */
+  @media (max-width: 600px) { .cards { grid-template-columns: 1fr 1fr; } nav button { padding: 8px 10px; font-size: 12px; } }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>⚡ WeatherSpeed</h1>
+  <span id="phase-badge" class="IDLE">IDLE</span>
+  <span id="dry-badge">DRY RUN</span>
+  <span id="server-ts">—</span>
+</header>
+
+<nav>
+  <button class="active" data-tab="overview">Overview</button>
+  <button data-tab="markets">Markets</button>
+  <button data-tab="history">Bid History</button>
+  <button data-tab="research">Research</button>
+  <button data-tab="settings">Settings</button>
+</nav>
+
+<main>
+
+  <!-- ── Overview ── -->
+  <div id="tab-overview" class="tab-panel active">
+    <div class="cards">
+      <div class="card">
+        <div class="label">Phase</div>
+        <div class="value" id="ov-phase">—</div>
+        <div class="sub">Watch status</div>
+      </div>
+      <div class="card">
+        <div class="label">Markets Today</div>
+        <div class="value" id="ov-markets">—</div>
+        <div class="sub">Discovered buckets</div>
+      </div>
+      <div class="card">
+        <div class="label">Last Bid Run</div>
+        <div class="value" id="ov-bids">—</div>
+        <div class="sub">Bids in last cycle</div>
+      </div>
+      <div class="card">
+        <div class="label">Mode</div>
+        <div class="value" id="ov-mode">—</div>
+        <div class="sub">dry_run setting</div>
+      </div>
+    </div>
+
+    <div class="section-header">
+      <h2>Controls</h2>
+      <div class="actions">
+        <button class="btn" onclick="triggerRefreshMarkets()">🔄 Refresh Markets</button>
+        <button class="btn primary" onclick="triggerManualBid()">⚡ Manual Bid Cycle</button>
+      </div>
+    </div>
+
+    <div id="errors-list"></div>
+  </div>
+
+  <!-- ── Markets ── -->
+  <div id="tab-markets" class="tab-panel">
+    <div class="section-header">
+      <h2>Discovered Markets</h2>
+      <div class="actions">
+        <button class="btn" onclick="triggerRefreshMarkets()">🔄 Refresh</button>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table id="markets-table">
+        <thead>
+          <tr>
+            <th>City / Series</th>
+            <th>Ticker</th>
+            <th>Bucket</th>
+            <th>NO Ask</th>
+            <th>YES Ask</th>
+            <th>Open Interest</th>
+            <th>Volume</th>
+            <th>Open Time</th>
+          </tr>
+        </thead>
+        <tbody id="markets-tbody"></tbody>
+      </table>
+    </div>
+    <div id="markets-empty" class="empty" style="display:none">
+      <div class="icon">🔍</div>
+      No markets discovered yet.<br>Markets are created ~09:31 UTC daily.
+    </div>
+  </div>
+
+  <!-- ── Bid History ── -->
+  <div id="tab-history" class="tab-panel">
+    <div class="section-header">
+      <h2>Bid History</h2>
+      <div class="actions">
+        <label for="date-pick" style="color:var(--muted); font-size:12px">Date:</label>
+        <input type="date" id="date-pick" style="background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:5px 8px;font-size:12px"/>
+        <button class="btn" onclick="loadBids()">Go</button>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table id="bids-table">
+        <thead>
+          <tr>
+            <th>Event</th>
+            <th>Ticker</th>
+            <th>City</th>
+            <th>Bucket</th>
+            <th>NO Price</th>
+            <th>Contracts</th>
+            <th>OI at Bid</th>
+            <th>First?</th>
+            <th>ms After Open</th>
+            <th>Status</th>
+            <th>Dry?</th>
+          </tr>
+        </thead>
+        <tbody id="bids-tbody"></tbody>
+      </table>
+    </div>
+    <div id="bids-empty" class="empty" style="display:none">
+      <div class="icon">📋</div>
+      No bids recorded for this date.
+    </div>
+  </div>
+
+  <!-- ── Research ── -->
+  <div id="tab-research" class="tab-panel">
+    <div class="section-header">
+      <h2>Market Timing — Historical</h2>
+      <div class="sub" style="color:var(--muted); font-size:12px">All times UTC. Markets historically created 09:30–09:31, open at exactly 14:00:00.</div>
+    </div>
+
+    <div id="creation-chart">
+      <canvas id="timing-canvas"></canvas>
+      <div class="chart-label">Creation Time Distribution (seconds past 09:30:00 UTC)</div>
+      <div class="chart-sublabel">Each dot = one market creation event</div>
+    </div>
+
+    <div class="table-wrap" style="margin-bottom:20px">
+      <table id="timing-table">
+        <thead>
+          <tr>
+            <th>Settlement Date</th>
+            <th>City</th>
+            <th>Kind</th>
+            <th>Series</th>
+            <th>Event Ticker</th>
+            <th>Created Time (UTC)</th>
+            <th>Secs Past 09:30</th>
+            <th>Open Time (UTC)</th>
+          </tr>
+        </thead>
+        <tbody id="timing-tbody"></tbody>
+      </table>
+    </div>
+
+    <div class="section-header" style="margin-top:20px">
+      <h2>Session Log</h2>
+    </div>
+    <div class="log-wrap" id="session-log"></div>
+  </div>
+
+  <!-- ── Settings ── -->
+  <div id="tab-settings" class="tab-panel">
+    <div class="section-header">
+      <h2>Runtime Settings</h2>
+      <div class="actions">
+        <button class="btn primary" onclick="saveSettings()">💾 Save All</button>
+      </div>
+    </div>
+    <div class="settings-grid" id="settings-grid"></div>
+  </div>
+
+</main>
+
+<div id="toast"></div>
+
+<script>
+// ── State ────────────────────────────────────────────────────────────────────
+let _settings = {};
+let _pollInterval = null;
+
+// ── Tabs ─────────────────────────────────────────────────────────────────────
+document.querySelectorAll("nav button").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("nav button").forEach(b => b.classList.remove("active"));
+    document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
+    btn.classList.add("active");
+    document.getElementById("tab-" + btn.dataset.tab).classList.add("active");
+    if (btn.dataset.tab === "research") loadResearch();
+    if (btn.dataset.tab === "history") loadBids();
+    if (btn.dataset.tab === "settings") loadSettings();
+  });
+});
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+function toast(msg, type="ok") {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.className = "show " + type;
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.className = "", 2800);
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function fmt_ts(iso) {
+  if (!iso) return "—";
+  try {
+    const d = new Date(iso);
+    return d.toISOString().replace("T", " ").slice(0, 19) + " UTC";
+  } catch { return iso; }
+}
+
+function fmt_cents(c) {
+  if (c === undefined || c === null) return "—";
+  return c + "¢";
+}
+
+function epoch_to_hms(ts) {
+  if (!ts) return "—";
+  const d = new Date(ts * 1000);
+  return d.toISOString().slice(11, 19) + " UTC";
+}
+
+// ── API calls ─────────────────────────────────────────────────────────────────
+async function api(path, opts={}) {
+  const r = await fetch(path, opts);
+  if (!r.ok) throw new Error(r.statusText);
+  return r.json();
+}
+
+// ── Overview poll ─────────────────────────────────────────────────────────────
+async function pollState() {
+  try {
+    const s = await api("/api/state");
+
+    // Header badges
+    const pb = document.getElementById("phase-badge");
+    pb.textContent = s.watch_phase;
+    pb.className   = s.watch_phase;
+
+    const db = document.getElementById("dry-badge");
+    db.textContent = s.dry_run ? "DRY RUN" : "LIVE";
+    db.className   = s.dry_run ? "" : "live";
+
+    document.getElementById("server-ts").textContent =
+      s.server_ts ? "updated " + epoch_to_hms(s.server_ts) : "";
+
+    // Cards
+    document.getElementById("ov-phase").textContent   = s.watch_phase;
+    document.getElementById("ov-markets").textContent = s.markets.length;
+    document.getElementById("ov-bids").textContent    = s.last_bid_count;
+    document.getElementById("ov-mode").textContent    = s.dry_run ? "DRY RUN" : "LIVE";
+
+    // Markets table (keep fresh even when not on markets tab)
+    renderMarketsTable(s.markets);
+
+    // Errors
+    renderErrors(s.errors || []);
+  } catch (e) {
+    console.error("pollState:", e);
+  }
+}
+
+function renderMarketsTable(markets) {
+  const tbody  = document.getElementById("markets-tbody");
+  const empty  = document.getElementById("markets-empty");
+  if (!markets.length) {
+    tbody.innerHTML = "";
+    empty.style.display = "";
+    return;
+  }
+  empty.style.display = "none";
+  tbody.innerHTML = markets.map(m => {
+    const oi_pill = m.open_interest === 0
+      ? '<span class="pill green">0 — first!</span>'
+      : '<span class="pill gray">' + m.open_interest.toFixed(0) + '</span>';
+    return `<tr>
+      <td>${m.event_ticker.split("-")[0]}</td>
+      <td class="mono" style="font-size:11px">${m.ticker}</td>
+      <td>${m.bucket || "—"}</td>
+      <td>${fmt_cents(m.no_ask_cents)}</td>
+      <td>${fmt_cents(m.yes_ask_cents)}</td>
+      <td>${oi_pill}</td>
+      <td>${m.volume.toFixed(0)}</td>
+      <td style="font-size:11px">${fmt_ts(m.open_time)}</td>
+    </tr>`;
+  }).join("");
+}
+
+function renderErrors(errors) {
+  const el = document.getElementById("errors-list");
+  if (!errors.length) { el.innerHTML = ""; return; }
+  el.innerHTML = errors.slice().reverse().map(e =>
+    `<div class="err-item"><span class="err-ts">${e.ts}</span><span class="err-msg">${e.msg}</span></div>`
+  ).join("");
+}
+
+// ── Bid History ───────────────────────────────────────────────────────────────
+async function loadBids() {
+  const dp = document.getElementById("date-pick");
+  if (!dp.value) {
+    // Default to today ET (UTC-4)
+    const et = new Date(Date.now() - 4*3600*1000);
+    dp.value = et.toISOString().slice(0, 10);
+  }
+  try {
+    const d = await api("/api/bids?date=" + dp.value);
+    renderBidsTable(d.bids);
+  } catch (e) {
+    toast("Failed to load bids: " + e.message, "err");
+  }
+}
+
+function renderBidsTable(bids) {
+  const tbody = document.getElementById("bids-tbody");
+  const empty = document.getElementById("bids-empty");
+  if (!bids.length) {
+    tbody.innerHTML = "";
+    empty.style.display = "";
+    return;
+  }
+  empty.style.display = "none";
+  tbody.innerHTML = bids.map(b => {
+    const firstPill = b.was_first   // SQLite returns 0/1
+      ? '<span class="pill green">✓ FIRST</span>'
+      : '<span class="pill gray">no</span>';
+    const statusPill = b.status === "placed"
+      ? '<span class="pill green">placed</span>'
+      : '<span class="pill red">' + (b.status || "?") + '</span>';
+    const dryPill = b.dry_run
+      ? '<span class="pill yellow">dry</span>'
+      : '<span class="pill blue">live</span>';
+    return `<tr>
+      <td class="mono" style="font-size:11px">${b.event_ticker || "—"}</td>
+      <td class="mono" style="font-size:11px">${b.ticker || "—"}</td>
+      <td>${b.city || "—"}</td>
+      <td>${b.bucket_label || "—"}</td>
+      <td>${fmt_cents(b.no_price_cents)}</td>
+      <td>${b.contracts}</td>
+      <td>${b.open_interest}</td>
+      <td>${firstPill}</td>
+      <td>${b.ms_after_open !== null ? b.ms_after_open + " ms" : "—"}</td>
+      <td>${statusPill}</td>
+      <td>${dryPill}</td>
+    </tr>`;
+  }).join("");
+}
+
+// ── Research ──────────────────────────────────────────────────────────────────
+async function loadResearch() {
+  try {
+    const d = await api("/api/research");
+    renderTimingTable(d.timing || []);
+    renderTimingChart(d.timing || []);
+    renderSessionLog(d.log || []);
+  } catch (e) {
+    toast("Failed to load research: " + e.message, "err");
+  }
+}
+
+function renderTimingTable(rows) {
+  const tbody = document.getElementById("timing-tbody");
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:24px">No timing data yet. Data populates as markets are discovered.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rows.map(r => {
+    const created = r.created_time || "";
+    let secsPast = "—";
+    if (created) {
+      try {
+        const dt = new Date(created);
+        const ref = new Date(dt);
+        ref.setUTCHours(9, 30, 0, 0);
+        secsPast = ((dt - ref) / 1000).toFixed(1) + "s";
+      } catch {}
+    }
+    const kindPill = r.kind === "high"
+      ? '<span class="pill red">HIGH</span>'
+      : '<span class="pill blue">LOW</span>';
+    return `<tr>
+      <td>${r.settlement_date || "—"}</td>
+      <td>${r.city || "—"}</td>
+      <td>${kindPill}</td>
+      <td class="mono" style="font-size:11px">${r.series_ticker || "—"}</td>
+      <td class="mono" style="font-size:11px">${r.event_ticker || "—"}</td>
+      <td class="mono" style="font-size:11px">${fmt_ts(r.created_time)}</td>
+      <td style="font-variant-numeric:tabular-nums">${secsPast}</td>
+      <td class="mono" style="font-size:11px">${fmt_ts(r.open_time)}</td>
+    </tr>`;
+  }).join("");
+}
+
+function renderTimingChart(rows) {
+  const canvas = document.getElementById("timing-canvas");
+  const ctx    = canvas.getContext("2d");
+  const W = canvas.offsetWidth  || 800;
+  const H = canvas.offsetHeight || 200;
+  canvas.width  = W;
+  canvas.height = H;
+
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = "#161b22";
+  ctx.fillRect(0, 0, W, H);
+
+  if (!rows.length) {
+    ctx.fillStyle = "#555";
+    ctx.font = "13px monospace";
+    ctx.textAlign = "center";
+    ctx.fillText("No data yet", W/2, H/2);
+    return;
+  }
+
+  // Compute seconds past 09:30:00 for each row
+  const points = [];
+  rows.forEach(r => {
+    if (!r.created_time) return;
+    try {
+      const dt  = new Date(r.created_time);
+      const ref = new Date(dt);
+      ref.setUTCHours(9, 30, 0, 0);
+      const secs = (dt - ref) / 1000;
+      points.push({ secs, city: r.city, kind: r.kind, date: r.settlement_date });
+    } catch {}
+  });
+
+  if (!points.length) return;
+
+  const minS = Math.min(...points.map(p => p.secs));
+  const maxS = Math.max(...points.map(p => p.secs));
+  const range = Math.max(maxS - minS, 60);  // at least 60s window
+  const padL = 50, padR = 20, padT = 30, padB = 30;
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
+
+  // Grid lines every 10s
+  ctx.strokeStyle = "#222";
+  ctx.lineWidth   = 1;
+  for (let s = Math.floor(minS / 10) * 10; s <= maxS + 10; s += 10) {
+    const x = padL + ((s - minS) / range) * plotW;
+    ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, padT + plotH); ctx.stroke();
+    ctx.fillStyle = "#555";
+    ctx.font = "10px monospace";
+    ctx.textAlign = "center";
+    ctx.fillText("+" + s.toFixed(0) + "s", x, padT + plotH + 16);
+  }
+
+  // Reference line at 0s (09:30:00)
+  const x0 = padL + ((0 - minS) / range) * plotW;
+  if (x0 >= padL && x0 <= padL + plotW) {
+    ctx.strokeStyle = "#555";
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.moveTo(x0, padT); ctx.lineTo(x0, padT + plotH); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // Scatter dots — jitter on Y axis so overlapping dots are visible
+  const jitterMap = {};
+  points.forEach((p, i) => {
+    const key = p.secs.toFixed(1);
+    jitterMap[key] = (jitterMap[key] || 0) + 1;
+    const x = padL + ((p.secs - minS) / range) * plotW;
+    const y = padT + plotH * 0.2 + (jitterMap[key] - 1) * 14;
+    ctx.beginPath();
+    ctx.arc(x, Math.min(y, padT + plotH - 6), 5, 0, Math.PI * 2);
+    ctx.fillStyle = p.kind === "high" ? "#f85149" : "#58a6ff";
+    ctx.fill();
+  });
+
+  // Legend
+  ctx.fillStyle = "#f85149"; ctx.beginPath(); ctx.arc(padL, padT - 12, 5, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = "#aaa"; ctx.font = "11px monospace"; ctx.textAlign = "left";
+  ctx.fillText("HIGH", padL + 10, padT - 8);
+  ctx.fillStyle = "#58a6ff"; ctx.beginPath(); ctx.arc(padL + 60, padT - 12, 5, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = "#aaa"; ctx.fillText("LOW", padL + 70, padT - 8);
+}
+
+function renderSessionLog(log) {
+  const el = document.getElementById("session-log");
+  if (!log.length) {
+    el.innerHTML = '<div class="log-line" style="text-align:center;padding:16px">No log entries yet.</div>';
+    return;
+  }
+  el.innerHTML = log.slice().reverse().map(l =>
+    `<div class="log-line"><span class="ts">${l.ts || ""}</span><span class="evt">${l.event || ""}</span>${l.detail || ""}</div>`
+  ).join("");
+}
+
+// ── Settings ──────────────────────────────────────────────────────────────────
+const SETTING_META = {
+  dry_run:                    { label: "Dry Run",               desc: "Simulate bids without placing real orders",         type: "bool" },
+  auto_bid_enabled:           { label: "Auto-Bid Enabled",      desc: "Automatically fire bids at market open (14:00 UTC)", type: "bool" },
+  bid_only_zero_oi:           { label: "First-Only Mode",       desc: "Only bid when open interest = 0 (you are first)",   type: "bool" },
+  track_market_timing:        { label: "Track Timing",          desc: "Record market creation/open times to DB",            type: "bool" },
+  contracts_per_market:       { label: "Contracts / Market",    desc: "Number of contracts to bid per bucket",              type: "int",  min: 1, max: 100 },
+  max_no_price_cents:         { label: "Max NO Price (¢)",      desc: "Skip if NO ask is above this price in cents",        type: "int",  min: 1, max: 99  },
+  min_no_price_cents:         { label: "Min NO Price (¢)",      desc: "Skip if NO ask is below this price in cents",        type: "int",  min: 1, max: 99  },
+  creation_poll_interval_secs:{ label: "Poll Interval (sec)",   desc: "Seconds between creation-watch polls",               type: "int",  min: 1, max: 60  },
+  creation_poll_start_utc_hour:  { label: "Watch Start Hour (UTC)",   desc: "UTC hour to begin creation polling",           type: "int",  min: 0, max: 23  },
+  creation_poll_start_utc_minute:{ label: "Watch Start Min (UTC)",    desc: "UTC minute to begin creation polling",         type: "int",  min: 0, max: 59  },
+  open_time_utc_hour:         { label: "Open Trigger Hour (UTC)", desc: "UTC hour to fire the bid cycle",                   type: "int",  min: 0, max: 23  },
+  open_time_utc_minute:       { label: "Open Trigger Min (UTC)",  desc: "UTC minute to fire the bid cycle",                 type: "int",  min: 0, max: 59  },
+};
+
+async function loadSettings() {
+  try {
+    const d = await api("/api/settings");
+    _settings = d;
+    renderSettings(d);
+  } catch (e) {
+    toast("Failed to load settings: " + e.message, "err");
+  }
+}
+
+function renderSettings(s) {
+  const grid = document.getElementById("settings-grid");
+  grid.innerHTML = Object.entries(SETTING_META).map(([k, meta]) => {
+    const val = s[k];
+    let control = "";
+    if (meta.type === "bool") {
+      control = `<label class="toggle">
+        <input type="checkbox" id="s_${k}" ${val ? "checked" : ""}/>
+        <span class="slider"></span>
+      </label>`;
+    } else {
+      control = `<input class="num-input" type="number" id="s_${k}" value="${val ?? ""}" min="${meta.min||0}" max="${meta.max||9999}"/>`;
+    }
+    return `<div class="setting-row">
+      <div class="meta">
+        <div class="name">${meta.label}</div>
+        <div class="desc">${meta.desc}</div>
+      </div>
+      ${control}
+    </div>`;
+  }).join("");
+}
+
+async function saveSettings() {
+  const payload = {};
+  for (const [k, meta] of Object.entries(SETTING_META)) {
+    const el = document.getElementById("s_" + k);
+    if (!el) continue;
+    if (meta.type === "bool") {
+      payload[k] = el.checked;
+    } else {
+      payload[k] = parseInt(el.value, 10);
+    }
+  }
+  try {
+    await api("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    _settings = payload;
+    toast("Settings saved ✓", "ok");
+  } catch (e) {
+    toast("Save failed: " + e.message, "err");
+  }
+}
+
+// ── Manual triggers ───────────────────────────────────────────────────────────
+async function triggerManualBid() {
+  if (!confirm("Fire a bid cycle right now?")) return;
+  try {
+    const r = await api("/api/manual-trigger");
+    toast(r.msg, "ok");
+  } catch (e) {
+    toast("Error: " + e.message, "err");
+  }
+}
+
+async function triggerRefreshMarkets() {
+  try {
+    const r = await api("/api/refresh-markets");
+    toast(r.msg, "ok");
+  } catch (e) {
+    toast("Error: " + e.message, "err");
+  }
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+pollState();
+_pollInterval = setInterval(pollState, 4000);
+
+// Set default date on history picker
+const etNow = new Date(Date.now() - 4*3600*1000);
+document.getElementById("date-pick").value = etNow.toISOString().slice(0, 10);
+</script>
+</body>
+</html>
