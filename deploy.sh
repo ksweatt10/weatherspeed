@@ -8,6 +8,7 @@ set -euo pipefail
 VPS_USER="ubuntu"
 VPS_HOST="${VPS_HOST:-}"   # set env var or edit below
 VPS_DIR="/home/ubuntu/weatherspeed"
+VPS_KEY="${VPS_KEY:-$HOME/.ssh/kalshi_vps}"   # SSH key for the VPS
 REPO="https://github.com/ksweatt10/weatherspeed.git"
 SERVICE="weatherspeed"
 
@@ -23,7 +24,7 @@ echo "==> Pushing to GitHub..."
 git push
 
 # SSH into VPS and pull + restart
-ssh "$VPS_USER@$VPS_HOST" bash <<REMOTE
+ssh -i "$VPS_KEY" "$VPS_USER@$VPS_HOST" bash <<REMOTE
   set -euo pipefail
 
   # Clone on first deploy, pull on subsequent
