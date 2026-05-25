@@ -72,6 +72,8 @@ def start() -> None:
         # Markets found but not open yet — start WS watcher to catch activation
         print("[scheduler] Post-creation window — starting WS watcher for open")
         _start_ws_watcher()
-    elif now.hour == 13 and now.minute >= 59:
-        print("[scheduler] Near open — starting timer fallback now")
-        _start_open_trigger()
+        # If we restarted inside the 13:59 window the APScheduler job may have
+        # been missed — start the timer fallback directly as well.
+        if now.hour == 13 and now.minute >= 59:
+            print("[scheduler] Near open — also starting timer fallback")
+            _start_open_trigger()
