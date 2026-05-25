@@ -112,7 +112,7 @@ def api_settings_post():
                  "creation_poll_start_utc_hour",
                  "creation_poll_start_utc_minute",
                  "open_time_utc_hour", "open_time_utc_minute",
-                 "batch_size", "batch_concurrency"}
+                 "batch_size", "batch_concurrency", "batch_inter_round_ms"}
     for k, v in data.items():
         if k in bool_keys:
             runtime_config.set(k, bool(v))

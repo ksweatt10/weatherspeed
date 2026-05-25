@@ -583,6 +583,7 @@ const SMETA = {
   min_no_price_cents:  {l:"Min NO Price (¢)",   d:"Skip if NO ask < this cents",                             t:"int", min:1, max:99},
   batch_size:          {l:"Batch Size",         d:"Orders per batch POST (Kalshi limit ≈30; 192÷30=7 chunks)",t:"int", min:1, max:30},
   batch_concurrency:   {l:"Batch Concurrency",  d:"Simultaneous batch requests in flight (1–3 recommended)", t:"int", min:1, max:5},
+  batch_inter_round_ms:{l:"Inter-Round Delay",  d:"ms to sleep between rounds of chunks (0=RTT only; try 100–200 if 429s occur live)", t:"int", min:0, max:2000},
   creation_poll_interval_secs:{l:"Poll Interval (s)",d:"Seconds between creation-watch REST polls",          t:"int", min:1, max:60},
   creation_poll_start_utc_hour:  {l:"Watch Start Hour",  d:"UTC hour to begin creation polling (default 9)", t:"int", min:0, max:23},
   creation_poll_start_utc_minute:{l:"Watch Start Min",   d:"UTC minute to begin polling (default 28)",       t:"int", min:0, max:59},

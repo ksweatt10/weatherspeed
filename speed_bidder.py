@@ -51,8 +51,9 @@ async def run_bids(ws_state: dict | None = None) -> None:
     min_no       = runtime_config.get("min_no_price_cents",     50)
     only_zero    = runtime_config.get("bid_only_zero_oi",       True)
     auto_bid     = runtime_config.get("auto_bid_enabled",       True)
-    batch_size   = runtime_config.get("batch_size",             30)
-    batch_conc   = runtime_config.get("batch_concurrency",       3)
+    batch_size      = runtime_config.get("batch_size",             30)
+    batch_conc      = runtime_config.get("batch_concurrency",      3)
+    inter_round_ms  = runtime_config.get("batch_inter_round_ms",   0)
 
     if not auto_bid:
         print("[bidder] auto_bid_enabled=False — skipping")
@@ -154,6 +155,7 @@ async def run_bids(ws_state: dict | None = None) -> None:
             dry_run           = dry_run,
             batch_size        = batch_size,
             batch_concurrency = batch_conc,
+            inter_round_ms    = inter_round_ms,
         )
         ms_bid = round((time.perf_counter() - t_bid) * 1000)
 

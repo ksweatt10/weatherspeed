@@ -93,13 +93,18 @@ class SpeedClient:
                 return await r.json()
         raise RuntimeError(f"_get {path} failed after {_retry} attempts")
 
-    async def _post(self, path: str, body: dict) -> dict:
+    async def _post(self, path: str, body: dict, _retry: int = 3) -> dict:
         full_path = f"{_PREFIX}{path}"
-        headers   = _auth_headers("POST", full_path)
-        async with self._session.post(full_path, headers=headers,
-                                      json=body) as r:
-            r.raise_for_status()
-            return await r.json()
+        for attempt in range(_retry):
+            headers = _auth_headers("POST", full_path)
+            async with self._session.post(full_path, headers=headers,
+                                          json=body) as r:
+                if r.status == 429 and attempt < _retry - 1:
+                    await asyncio.sleep(0.5 * (attempt + 1))   # 0.5s, 1.0s
+                    continue
+                r.raise_for_status()
+                return await r.json()
+        raise RuntimeError(f"_post {path} failed after {_retry} attempts")
 
     # ── Market discovery ──────────────────────────────────────────────────────
 
@@ -179,7 +184,8 @@ class SpeedClient:
                              only_zero_oi: bool = True,
                              dry_run: bool = True,
                              batch_size: int = 30,
-                             batch_concurrency: int = 3) -> list[dict]:
+                             batch_concurrency: int = 3,
+                             inter_round_ms: int = 0) -> list[dict]:
         """
         Place NO bids on all qualifying markets using chunked batch POSTs.
 
@@ -269,25 +275,41 @@ class SpeedClient:
         print(f"[speed] firing {len(to_place)} orders across "
               f"{n_chunks} chunks (size≤{batch_size}, concurrency={batch_concurrency})")
 
-        # ── Send chunks with controlled concurrency ───────────────────────────
-        sem = asyncio.Semaphore(batch_concurrency)
+        # ── Send chunks in rounds with controlled concurrency ─────────────────
+        # Split chunks into rounds of batch_concurrency each.
+        # Within a round, chunks fire concurrently.
+        # Between rounds, optionally sleep inter_round_ms (token-bucket refill).
+        #
+        # Example: 7 chunks, concurrency=3, inter_round_ms=0
+        #   Round 1: chunks 0,1,2 concurrent
+        #   Round 2: chunks 3,4,5 concurrent
+        #   Round 3: chunk  6
 
         async def _post_chunk(chunk: list[dict], chunk_idx: int):
-            async with sem:
-                t1   = time.perf_counter()
-                resp = await self._post("/portfolio/orders/batched",
-                                        {"orders": chunk})
-                ms   = round((time.perf_counter() - t1) * 1000)
-                print(f"[speed] chunk {chunk_idx+1}/{n_chunks} "
-                      f"({len(chunk)} orders) → {ms}ms")
-                return resp, ms
+            t1   = time.perf_counter()
+            resp = await self._post("/portfolio/orders/batched",
+                                    {"orders": chunk})
+            ms   = round((time.perf_counter() - t1) * 1000)
+            print(f"[speed] chunk {chunk_idx+1}/{n_chunks} "
+                  f"({len(chunk)} orders) → {ms}ms")
+            return resp, ms
 
-        chunk_tasks = [
-            _post_chunk(chunk, idx) for idx, chunk in enumerate(chunks)
-        ]
+        responses: list = []
+        for round_start in range(0, n_chunks, batch_concurrency):
+            round_chunks = chunks[round_start : round_start + batch_concurrency]
+            round_tasks  = [
+                _post_chunk(c, round_start + i)
+                for i, c in enumerate(round_chunks)
+            ]
+            round_results = await asyncio.gather(*round_tasks,
+                                                 return_exceptions=True)
+            responses.extend(round_results)
 
-        responses = await asyncio.gather(*chunk_tasks, return_exceptions=True)
-        ms_total  = round((time.perf_counter() - t0) * 1000)
+            # Inter-round pause for token-bucket refill (skipped on last round)
+            if inter_round_ms > 0 and round_start + batch_concurrency < n_chunks:
+                await asyncio.sleep(inter_round_ms / 1000)
+
+        ms_total = round((time.perf_counter() - t0) * 1000)
 
         # ── Parse all responses back to result dicts ──────────────────────────
         for resp_or_exc in responses:

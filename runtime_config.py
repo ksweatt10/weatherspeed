@@ -16,6 +16,7 @@ _defaults: dict = {
     "min_no_price_cents":   50,      # skip NO bids below this price (too risky)
     "batch_size":           30,      # orders per batch POST (Kalshi limit ~30)
     "batch_concurrency":    3,       # max simultaneous batch requests in flight
+    "batch_inter_round_ms": 0,       # ms sleep between rounds (0 = RTT-only spacing)
 
     # ── Timing ───────────────────────────────────────────────────────────────
     # Markets created daily ~09:30–09:31 UTC; open exactly 14:00:00 UTC
