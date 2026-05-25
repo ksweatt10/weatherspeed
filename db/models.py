@@ -82,9 +82,14 @@ def init_db() -> None:
             ts          TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
         );
         """)
-        # Migration: add first_bid_time columns if upgrading from older schema
-        _safe_add_column(con, "market_timing",  "first_bid_time", "TEXT")
-        _safe_add_column(con, "market_buckets", "first_bid_time", "TEXT")
+        # Migration: add columns if upgrading from older schema
+        _safe_add_column(con, "market_timing",  "first_bid_time",          "TEXT")
+        _safe_add_column(con, "market_buckets", "first_bid_time",          "TEXT")
+        _safe_add_column(con, "market_buckets", "first_trade_et",          "TEXT")
+        _safe_add_column(con, "market_buckets", "first_trade_contracts",   "REAL")
+        _safe_add_column(con, "market_buckets", "first_trade_yes_price",   "REAL")
+        _safe_add_column(con, "market_buckets", "first_trade_no_price",    "REAL")
+        _safe_add_column(con, "market_buckets", "first_trade_taker_side",  "TEXT")
 
 
 def _safe_add_column(con, table: str, col: str, dtype: str) -> None:
@@ -113,11 +118,49 @@ def upsert_market_timing(event_ticker: str, series_ticker: str, city: str,
               created_time, open_time))
 
 
+def _utc_to_et(utc_iso: str) -> str:
+    """Convert UTC ISO string to 'YYYY-MM-DD HH:MM:SS.mmm ET' (EDT = UTC-4)."""
+    from datetime import datetime, timezone, timedelta
+    _EDT = timezone(timedelta(hours=-4))
+    dt = datetime.fromisoformat(utc_iso.replace("Z", "+00:00"))
+    et = dt.astimezone(_EDT)
+    return et.strftime("%Y-%m-%d %H:%M:%S.") + f"{et.microsecond//1000:03d}" + " ET"
+
+
+def upsert_first_trade_data(ticker: str, utc_iso: str,
+                             contracts: float, yes_price: float,
+                             no_price: float, taker_side: str) -> None:
+    """
+    Write all first-trade fields for a bucket (from Kalshi GET /markets/trades).
+    Always overwrites — caller controls whether to skip already-populated rows.
+    ET time is computed from utc_iso automatically.
+    """
+    et_str = _utc_to_et(utc_iso)
+    with _conn() as con:
+        con.execute("""
+            UPDATE market_buckets SET
+                first_bid_time          = ?,
+                first_trade_et          = ?,
+                first_trade_contracts   = ?,
+                first_trade_yes_price   = ?,
+                first_trade_no_price    = ?,
+                first_trade_taker_side  = ?
+            WHERE ticker = ?
+        """, (utc_iso, et_str, contracts, yes_price, no_price, taker_side, ticker))
+        # Roll up first_bid_time to market_timing (event-level; only if not set)
+        con.execute("""
+            UPDATE market_timing SET first_bid_time = ?
+            WHERE event_ticker = (
+                SELECT event_ticker FROM market_buckets WHERE ticker = ?
+            ) AND first_bid_time IS NULL
+        """, (utc_iso, ticker))
+
+
 def upsert_first_trade_time(ticker: str, iso_ts: str) -> None:
     """
-    Record the first-ever trade time on a bucket (from Kalshi trades API).
-    iso_ts is the created_time string returned by GET /markets/trades.
-    Only writes if first_bid_time is currently NULL (never overwrites).
+    Legacy: record only the first-trade UTC time (no price/contract data).
+    Kept for backward compat; prefer upsert_first_trade_data for new calls.
+    Only writes if first_bid_time is currently NULL.
     """
     with _conn() as con:
         con.execute("""
@@ -196,6 +239,56 @@ def get_bucket_timing(event_ticker: str) -> list[dict]:
             ORDER BY floor_strike
         """, (event_ticker,)).fetchall()
     return [dict(r) for r in rows]
+
+
+def get_first_trades_for_research() -> list[dict]:
+    """
+    Return all buckets that have first-trade data, joined with market_timing
+    for city/kind/settlement context.  Used by the Research tab.
+    ms_after_open is computed from open_time vs first_bid_time.
+    """
+    from datetime import datetime, timezone
+    with _conn() as con:
+        rows = con.execute("""
+            SELECT
+                mb.ticker,
+                mb.event_ticker,
+                mb.bucket_label,
+                mb.floor_strike,
+                mb.cap_strike,
+                mb.open_time,
+                mb.first_bid_time         AS first_trade_utc,
+                mb.first_trade_et,
+                mb.first_trade_contracts,
+                mb.first_trade_yes_price,
+                mb.first_trade_no_price,
+                mb.first_trade_taker_side,
+                mt.city,
+                mt.kind,
+                mt.settlement_date,
+                mt.series_ticker
+            FROM market_buckets mb
+            LEFT JOIN market_timing mt ON mt.event_ticker = mb.event_ticker
+            WHERE mb.first_bid_time IS NOT NULL
+            ORDER BY mt.settlement_date DESC, mt.city, mt.kind, mb.floor_strike
+        """).fetchall()
+
+    result = []
+    for r in rows:
+        d = dict(r)
+        utc = d.get("first_trade_utc", "")
+        ot  = d.get("open_time", "")
+        if utc and ot:
+            try:
+                ft  = datetime.fromisoformat(utc.replace("Z", "+00:00"))
+                ot_ = datetime.fromisoformat(ot.replace("Z",  "+00:00"))
+                d["ms_after_open"] = int((ft - ot_).total_seconds() * 1000)
+            except Exception:
+                d["ms_after_open"] = None
+        else:
+            d["ms_after_open"] = None
+        result.append(d)
+    return result
 
 
 # ── bid_log ───────────────────────────────────────────────────────────────────

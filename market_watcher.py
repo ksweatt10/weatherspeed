@@ -316,16 +316,15 @@ async def pull_first_trades_for_open_markets(overwrite: bool = False) -> dict:
 
     Returns summary dict: {pulled, no_trades, already_set, errors, tickers}
     """
-    from db.models import upsert_first_trade_time, get_bucket_timing
+    from db.models import upsert_first_trade_data
 
-    today_str = _today_et_str()
+    today_str  = _today_et_str()
     discovered = state.get_discovered_markets()
     if not discovered:
         return {"pulled": 0, "no_trades": 0, "already_set": 0,
                 "errors": ["no markets discovered — run Refresh Markets first"],
                 "tickers": 0}
 
-    # Collect all tickers across discovered events
     tickers: list[str] = [
         m.get("ticker", "")
         for mkts in discovered.values()
@@ -334,13 +333,15 @@ async def pull_first_trades_for_open_markets(overwrite: bool = False) -> dict:
     ]
 
     if not overwrite:
-        # Skip buckets that already have a first_bid_time in the DB
+        # Skip only buckets that already have the full trade record.
+        # Buckets with time-only legacy data (first_trade_contracts IS NULL) are re-fetched.
         from db.models import _conn as _db_conn
         with _db_conn() as con:
             placeholders = ",".join("?" * len(tickers))
             rows = con.execute(
                 f"SELECT ticker FROM market_buckets "
-                f"WHERE ticker IN ({placeholders}) AND first_bid_time IS NOT NULL",
+                f"WHERE ticker IN ({placeholders}) "
+                f"AND first_trade_contracts IS NOT NULL",
                 tickers
             ).fetchall()
         already_done = {r[0] for r in rows}
@@ -355,9 +356,9 @@ async def pull_first_trades_for_open_markets(overwrite: bool = False) -> dict:
 
     pulled    = 0
     no_trades = 0
-    errors:   list[str] = []
+    errors: list[str] = []
 
-    _sem = asyncio.Semaphore(5)   # 5 concurrent pages at a time
+    _sem = asyncio.Semaphore(5)
 
     async with SpeedClient() as client:
         async def _fetch_one(ticker: str):
@@ -377,12 +378,17 @@ async def pull_first_trades_for_open_markets(overwrite: bool = False) -> dict:
         elif trade is None:
             no_trades += 1
         else:
-            iso_ts = trade.get("created_time", "")
-            if iso_ts:
-                upsert_first_trade_time(ticker, iso_ts)
-                pulled += 1
-            else:
+            utc_iso = trade.get("created_time", "")
+            if not utc_iso:
                 no_trades += 1
+                continue
+            contracts  = float(trade.get("count_fp",          0) or 0)
+            yes_price  = float(trade.get("yes_price_dollars", 0) or 0)
+            no_price   = float(trade.get("no_price_dollars",  0) or 0)
+            taker_side = trade.get("taker_side", "")
+            upsert_first_trade_data(ticker, utc_iso, contracts,
+                                    yes_price, no_price, taker_side)
+            pulled += 1
 
     summary = (f"first trades: {pulled} pulled, {no_trades} no trades, "
                f"{already_set} already set, {len(errors)} errors")

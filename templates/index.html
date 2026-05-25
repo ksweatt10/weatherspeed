@@ -285,6 +285,34 @@ input:checked+.slider:before{transform:translateX(18px)}
     </table>
   </div>
 
+  <div class="sh" style="margin-top:20px">
+    <h2>First Trades — Bucket Detail</h2>
+    <div class="acts">
+      <input id="ft-filter" placeholder="Filter city or bucket…"
+             style="background:var(--bg);border:1px solid var(--border);color:var(--text);
+                    border-radius:6px;padding:4px 10px;font-size:12px;width:200px"
+             oninput="renderFirstTradesTable(window._ftData||[])"/>
+    </div>
+  </div>
+  <p style="color:var(--muted);font-size:11px;margin-bottom:10px">
+    All fields from the Kalshi trades API for the <em>first</em> executed trade on each bucket.
+    YES/NO prices in cents. ms = milliseconds after 14:00:00 UTC market open.
+  </p>
+  <div class="tw" style="margin-bottom:20px">
+    <table id="ft-table">
+      <thead><tr>
+        <th>Settlement</th><th>City</th><th>Kind</th>
+        <th>Bucket</th><th>First Trade (ET)</th><th>ms After Open</th>
+        <th>Contracts</th><th>YES ¢</th><th>NO ¢</th><th>Taker</th>
+      </tr></thead>
+      <tbody id="ft-tbody"></tbody>
+    </table>
+  </div>
+  <div id="ft-empty" class="empty" style="display:none">
+    <div class="icon">📊</div>
+    No first-trade data yet. Click "⏱ Pull First Trades" above.
+  </div>
+
   <div class="sh" style="margin-top:16px"><h2>Session Log</h2></div>
   <div class="logwrap" id="session-log"></div>
 </div>
@@ -474,6 +502,8 @@ async function loadResearch() {
     renderTimingTable(d.timing||[]);
     renderTimingChart(d.timing||[]);
     renderSessionLog(d.log||[]);
+    window._ftData = d.first_trades||[];
+    renderFirstTradesTable(window._ftData);
   } catch(e) { toast("Research load failed: "+e.message,"err"); }
 }
 
@@ -581,6 +611,78 @@ function renderSessionLog(log) {
   el.innerHTML = log.slice().reverse().map(l =>
     `<div class="logline"><span class="lts">${(l.ts||"").slice(0,19)}</span><span class="levt">${l.event||""}</span>${l.detail||""}</div>`
   ).join("");
+}
+
+// ── First Trades table ────────────────────────────────────────────────────────
+function renderFirstTradesTable(rows) {
+  const filter = (document.getElementById("ft-filter")||{}).value||"";
+  const q      = filter.toLowerCase();
+  const tbody  = document.getElementById("ft-tbody");
+  const empty  = document.getElementById("ft-empty");
+
+  let filtered = rows;
+  if (q) {
+    filtered = rows.filter(r =>
+      (r.city||"").toLowerCase().includes(q) ||
+      (r.bucket_label||"").toLowerCase().includes(q) ||
+      (r.ticker||"").toLowerCase().includes(q)
+    );
+  }
+
+  if (!filtered.length) {
+    tbody.innerHTML = "";
+    empty.style.display = "";
+    return;
+  }
+  empty.style.display = "none";
+
+  tbody.innerHTML = filtered.map(r => {
+    const kpill = r.kind === "high"
+      ? '<span class="pill red" style="font-size:10px">HIGH</span>'
+      : '<span class="pill blue" style="font-size:10px">LOW</span>';
+
+    // ET time — strip date, keep HH:MM:SS.mmm ET
+    let etDisplay = r.first_trade_et || "—";
+    if (etDisplay !== "—") {
+      // "2026-05-25 10:00:21.693 ET" → "10:00:21.693 ET"
+      etDisplay = etDisplay.replace(/^\d{4}-\d{2}-\d{2}\s/, "");
+    }
+
+    const ms = r.ms_after_open != null
+      ? (r.ms_after_open >= 60000
+          ? `${(r.ms_after_open/60000).toFixed(1)}m`
+          : `${r.ms_after_open.toLocaleString()}ms`)
+      : "—";
+    const msCls = r.ms_after_open != null
+      ? (r.ms_after_open < 30000 ? "style='color:var(--green);font-weight:700'"
+       : r.ms_after_open < 120000 ? "style='color:var(--yellow)'"
+       : "") : "";
+
+    const contracts = r.first_trade_contracts != null
+      ? r.first_trade_contracts.toFixed(0) : "—";
+    const yesCents = r.first_trade_yes_price != null
+      ? Math.round(r.first_trade_yes_price * 100) + "¢" : "—";
+    const noCents  = r.first_trade_no_price  != null
+      ? Math.round(r.first_trade_no_price  * 100) + "¢" : "—";
+    const takerPill = r.first_trade_taker_side === "yes"
+      ? '<span class="pill green" style="font-size:10px">YES</span>'
+      : r.first_trade_taker_side === "no"
+        ? '<span class="pill red" style="font-size:10px">NO</span>'
+        : '<span style="color:var(--muted)">—</span>';
+
+    return `<tr>
+      <td>${r.settlement_date||"—"}</td>
+      <td>${r.city||"—"}</td>
+      <td>${kpill}</td>
+      <td style="font-size:11px">${r.bucket_label||"—"}</td>
+      <td class="mono" style="font-size:11px">${etDisplay}</td>
+      <td class="mono" ${msCls}>${ms}</td>
+      <td>${contracts}</td>
+      <td>${yesCents}</td>
+      <td>${noCents}</td>
+      <td>${takerPill}</td>
+    </tr>`;
+  }).join("");
 }
 
 // ── Settings ──────────────────────────────────────────────────────────────────

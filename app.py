@@ -9,7 +9,7 @@ import config
 import runtime_config
 import state
 from db.models import (init_db, get_bid_history, get_market_timing_history,
-                        get_session_log)
+                        get_session_log, get_first_trades_for_research)
 
 app = Flask(__name__)
 
@@ -96,9 +96,10 @@ def api_bids():
 
 @app.get("/api/research")
 def api_research():
-    timing = get_market_timing_history(days=60)
-    log    = get_session_log(limit=100)
-    return jsonify({"timing": timing, "log": log})
+    timing       = get_market_timing_history(days=60)
+    log          = get_session_log(limit=100)
+    first_trades = get_first_trades_for_research()
+    return jsonify({"timing": timing, "log": log, "first_trades": first_trades})
 
 
 @app.get("/api/balance")
