@@ -159,6 +159,112 @@ class SpeedClient:
         data = await self._post("/portfolio/orders", body)
         return data.get("order", data)
 
+    async def batch_no_bids(self, markets: list[dict], contracts: int = 1,
+                             max_no_cents: int = 70,
+                             min_no_cents: int = 50,
+                             only_zero_oi: bool = True,
+                             dry_run: bool = True) -> list[dict]:
+        """
+        Place NO bids on all qualifying markets via ONE batch POST request.
+        Primary execution path — called at market open via WS trigger.
+
+        markets dicts must have:
+          ticker (str), no_ask_cents (int), open_interest (float)
+
+        Returns same result format as bid_no_all() for DB compatibility.
+        """
+        import uuid
+        t0 = time.perf_counter()
+
+        results:   list[dict] = []
+        to_place:  list[dict] = []   # result dicts that passed qualification
+
+        for m in markets:
+            ticker   = m.get("ticker", "")
+            no_cents = int(m.get("no_ask_cents", 0))
+            oi       = float(m.get("open_interest") or 0)
+
+            r = {
+                "ticker":        ticker,
+                "no_ask_cents":  no_cents,
+                "open_interest": oi,
+                "placed":        False,
+                "dry_run":       dry_run,
+                "order_id":      None,
+                "error":         None,
+                "was_first":     oi == 0,
+                "ms_elapsed":    None,
+            }
+            results.append(r)
+
+            if only_zero_oi and oi > 0:
+                r["error"] = f"oi={oi:.0f}>0 skip"
+            elif no_cents < min_no_cents:
+                r["error"] = f"{no_cents}¢ < min {min_no_cents}¢"
+            elif no_cents > max_no_cents:
+                r["error"] = f"{no_cents}¢ > max {max_no_cents}¢"
+            elif dry_run:
+                r["placed"]    = True
+                r["order_id"]  = "DRY_RUN"
+                to_place.append(r)   # track for timing stamp
+            else:
+                to_place.append(r)   # qualifying live order
+
+        # Stamp dry-run timing and return early
+        if dry_run:
+            ms = round((time.perf_counter() - t0) * 1000)
+            for r in to_place:
+                r["ms_elapsed"] = ms
+            return results
+
+        if not to_place:
+            return results
+
+        # ── Build and fire single batch POST ──────────────────────────────────
+        cid_map: dict[str, dict] = {}
+        batch_orders = []
+        for r in to_place:
+            cid = f"spd-{uuid.uuid4().hex[:8]}"
+            cid_map[cid] = r
+            batch_orders.append({
+                "ticker":          r["ticker"],
+                "side":            "no",
+                "action":          "buy",
+                "count":           contracts,
+                "no_price":        r["no_ask_cents"],   # integer cents (V1 format)
+                "client_order_id": cid,
+                "time_in_force":   "good_till_canceled",
+            })
+
+        try:
+            resp     = await self._post("/portfolio/orders/batched",
+                                        {"orders": batch_orders})
+            ms_batch = round((time.perf_counter() - t0) * 1000)
+            print(f"[speed] batch POST complete in {ms_batch}ms "
+                  f"({len(batch_orders)} orders)")
+
+            for item in resp.get("orders", []):
+                r = cid_map.get(item.get("client_order_id", ""))
+                if not r:
+                    continue
+                if item.get("error"):
+                    r["error"]      = str(item["error"])
+                    r["ms_elapsed"] = ms_batch
+                else:
+                    ord_obj         = item.get("order", {})
+                    r["placed"]     = True
+                    r["order_id"]   = ord_obj.get("order_id") or ord_obj.get("id")
+                    r["ms_elapsed"] = ms_batch
+
+        except Exception as e:
+            ms_err = round((time.perf_counter() - t0) * 1000)
+            print(f"[speed] batch POST error after {ms_err}ms: {e}")
+            for r in to_place:
+                r["error"]      = str(e)
+                r["ms_elapsed"] = ms_err
+
+        return results
+
     async def bid_no_all(self, markets: list[dict], contracts: int = 1,
                           max_no_cents: int = 99,
                           min_no_cents: int = 50,

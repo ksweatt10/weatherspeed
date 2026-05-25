@@ -10,6 +10,7 @@ _state = {
     "last_bid_run":        [],        # results from most recent bid cycle
     "server_ts":           0.0,
     "errors":              [],
+    "bids_fired_today":    False,     # prevents double-fire (WS + timer fallback)
 }
 
 
@@ -35,6 +36,24 @@ def set_last_bid_run(results: list) -> None:
     with _lock:
         _state["last_bid_run"] = results
         _state["server_ts"]    = time.time()
+
+def claim_bids_fired() -> bool:
+    """
+    Atomically set bids_fired_today=True.
+    Returns True if this call was first (caller should proceed),
+    False if already fired (caller should skip).
+    """
+    with _lock:
+        if _state["bids_fired_today"]:
+            return False
+        _state["bids_fired_today"] = True
+        _state["server_ts"]        = time.time()
+        return True
+
+def reset_bids_fired() -> None:
+    """Reset at start of each day (called by scheduler on daily re-arm)."""
+    with _lock:
+        _state["bids_fired_today"] = False
 
 def add_error(msg: str) -> None:
     with _lock:
