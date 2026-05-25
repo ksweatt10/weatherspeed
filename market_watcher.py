@@ -210,6 +210,87 @@ def run_ws_watcher() -> None:
 
 # ── Phase 3: Timer fallback ───────────────────────────────────────────────────
 
+async def run_research_backfill(days: int = 7) -> dict:
+    """
+    Pull up to `days` worth of settled market data for all 32 series.
+    Stores creation time, open time, and settlement date into market_timing
+    and market_buckets tables so the Research tab has historical data.
+
+    Returns a summary dict: {inserted, skipped, series_errors}
+    """
+    from db.models import upsert_market_timing, upsert_market_bucket
+    today_str   = _today_et_str()
+    series_list = config.WEATHER_SERIES          # list of (ticker, city, kind)
+    series_map  = {s[0]: s for s in series_list}
+
+    inserted = 0
+    skipped  = 0
+    errors   = []
+
+    async with SpeedClient() as client:
+
+        async def _fetch_settled(series_ticker: str):
+            try:
+                # Fetch settled events (historical)
+                events = await client.list_events(series_ticker, status="settled")
+                # Also fetch open (today/upcoming) events
+                open_ev = await client.list_events(series_ticker, status="open")
+                return series_ticker, events + open_ev
+            except Exception as e:
+                return series_ticker, e
+
+        tasks   = [_fetch_settled(s[0]) for s in series_list]
+        results = await asyncio.gather(*tasks)
+
+        for series_ticker, result in results:
+            if isinstance(result, Exception):
+                errors.append(f"{series_ticker}: {result}")
+                continue
+
+            series_info   = series_map.get(series_ticker)
+            if not series_info:
+                continue
+            _, city, kind = series_info
+
+            # Limit to most recent `days` events
+            events = result[:days]
+            if not events:
+                continue
+
+            event_tickers = [e.get("event_ticker", "") for e in events]
+            market_map    = await client.get_all_markets_for_events(event_tickers)
+
+            for evt in events:
+                et      = evt.get("event_ticker", "")
+                markets = market_map.get(et, [])
+                if not markets:
+                    skipped += 1
+                    continue
+
+                m0           = markets[0]
+                created_time = m0.get("created_time", "")
+                open_time    = m0.get("open_time",    "")
+                settlement   = m0.get("occurrence_datetime", "")[:10] or \
+                               m0.get("expiration_time",     "")[:10] or ""
+
+                if runtime_config.get("track_market_timing", True):
+                    upsert_market_timing(et, series_ticker, city, kind,
+                                         settlement, created_time, open_time)
+                    for mkt in markets:
+                        upsert_market_bucket(
+                            et, mkt.get("ticker", ""),
+                            mkt.get("no_sub_title") or mkt.get("yes_sub_title", ""),
+                            mkt.get("floor_strike"), mkt.get("cap_strike"),
+                            mkt.get("created_time", ""), mkt.get("open_time", ""),
+                        )
+                    inserted += 1
+
+    summary = f"backfill done: {inserted} events inserted, {skipped} skipped, {len(errors)} errors"
+    print(f"[watcher] {summary}")
+    log_event(today_str, "BACKFILL", summary)
+    return {"inserted": inserted, "skipped": skipped, "errors": errors}
+
+
 def run_open_trigger() -> None:
     """
     FALLBACK ONLY — fires at 14:00:05 UTC if WS hasn't already triggered.

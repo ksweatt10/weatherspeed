@@ -5,133 +5,127 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>WeatherSpeed Bot</title>
 <style>
-  :root {
-    --bg:      #0d1117;
-    --surface: #161b22;
-    --border:  #30363d;
-    --accent:  #58a6ff;
-    --green:   #3fb950;
-    --yellow:  #d29922;
-    --red:     #f85149;
-    --muted:   #8b949e;
-    --text:    #e6edf3;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", monospace; font-size: 13px; }
+:root{--bg:#0d1117;--surface:#161b22;--border:#30363d;--accent:#58a6ff;--green:#3fb950;--yellow:#d29922;--red:#f85149;--muted:#8b949e;--text:#e6edf3}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",monospace;font-size:13px}
 
-  /* ── Header ── */
-  header { display: flex; align-items: center; gap: 16px; padding: 14px 20px; border-bottom: 1px solid var(--border); background: var(--surface); }
-  header h1 { font-size: 16px; font-weight: 600; letter-spacing: .5px; }
-  #phase-badge { padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; letter-spacing: 1px; background: #333; color: var(--muted); }
-  #phase-badge.IDLE     { background: #1f2937; color: var(--muted); }
-  #phase-badge.WATCHING { background: #1c3a1c; color: var(--green); }
-  #phase-badge.READY    { background: #1c3a2c; color: #56d364; }
-  #phase-badge.ARMED    { background: #3a2c1c; color: var(--yellow); }
-  #phase-badge.FIRING   { background: #3a1c1c; color: var(--red); animation: pulse .6s infinite alternate; }
-  #dry-badge { margin-left: auto; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; background: #3a2c1c; color: var(--yellow); }
-  #dry-badge.live { background: #1c3a1c; color: var(--green); }
-  #server-ts { margin-left: 8px; color: var(--muted); font-size: 11px; }
-  @keyframes pulse { from { opacity: 1; } to { opacity: .4; } }
+/* Header */
+header{display:flex;align-items:center;gap:12px;padding:12px 20px;border-bottom:1px solid var(--border);background:var(--surface);flex-wrap:wrap}
+header h1{font-size:15px;font-weight:700;letter-spacing:.5px}
+.badge{padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700;letter-spacing:.8px}
+#phase-badge{background:#1f2937;color:var(--muted)}
+#phase-badge.WATCHING{background:#1c3a1c;color:var(--green)}
+#phase-badge.READY{background:#1c3a2c;color:#56d364}
+#phase-badge.ARMED{background:#3a2c1c;color:var(--yellow)}
+#phase-badge.FIRING{background:#3a1c1c;color:var(--red);animation:pulse .6s infinite alternate}
+#dry-badge{background:#3a2c1c;color:var(--yellow)}
+#dry-badge.live{background:#1c3a1c;color:var(--green)}
+#ws-badge{background:#1c1c3a;color:var(--muted)}
+#ws-badge.connected{background:#1c2a3a;color:var(--accent)}
+#server-ts{margin-left:auto;color:var(--muted);font-size:11px}
+@keyframes pulse{from{opacity:1}to{opacity:.4}}
 
-  /* ── Tabs ── */
-  nav { display: flex; gap: 0; border-bottom: 1px solid var(--border); padding: 0 20px; background: var(--surface); }
-  nav button { background: none; border: none; color: var(--muted); padding: 10px 16px; cursor: pointer; font-size: 13px; border-bottom: 2px solid transparent; transition: all .15s; }
-  nav button:hover { color: var(--text); }
-  nav button.active { color: var(--accent); border-bottom-color: var(--accent); }
+/* Tabs */
+nav{display:flex;border-bottom:1px solid var(--border);padding:0 20px;background:var(--surface)}
+nav button{background:none;border:none;color:var(--muted);padding:10px 15px;cursor:pointer;font-size:13px;border-bottom:2px solid transparent;transition:all .15s}
+nav button:hover{color:var(--text)}
+nav button.active{color:var(--accent);border-bottom-color:var(--accent)}
 
-  /* ── Main ── */
-  main { padding: 20px; }
-  .tab-panel { display: none; }
-  .tab-panel.active { display: block; }
+/* Main */
+main{padding:20px}
+.tab-panel{display:none}
+.tab-panel.active{display:block}
 
-  /* ── Cards ── */
-  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 20px; }
-  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
-  .card .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .8px; margin-bottom: 6px; }
-  .card .value { font-size: 24px; font-weight: 700; }
-  .card .sub   { color: var(--muted); font-size: 11px; margin-top: 4px; }
+/* Cards */
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:20px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px}
+.card .label{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.8px;margin-bottom:6px}
+.card .value{font-size:22px;font-weight:700;line-height:1.2}
+.card .sub{color:var(--muted);font-size:11px;margin-top:4px}
 
-  /* ── Tables ── */
-  .table-wrap { overflow-x: auto; }
-  table { width: 100%; border-collapse: collapse; }
-  th { background: var(--surface); color: var(--muted); font-weight: 600; text-align: left; padding: 8px 12px; font-size: 11px; text-transform: uppercase; letter-spacing: .6px; border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 1; }
-  td { padding: 7px 12px; border-bottom: 1px solid #1c2128; }
-  tr:hover td { background: #1c2128; }
-  .mono { font-family: monospace; }
-  .pill { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
-  .pill.green  { background: #1c3a1c; color: var(--green); }
-  .pill.yellow { background: #3a2c1c; color: var(--yellow); }
-  .pill.red    { background: #3a1c1c; color: var(--red); }
-  .pill.blue   { background: #1c2a3a; color: var(--accent); }
-  .pill.gray   { background: #222; color: var(--muted); }
+/* Section header */
+.sh{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:8px;flex-wrap:wrap}
+.sh h2{font-size:14px;font-weight:600}
+.sh .acts{display:flex;gap:6px;flex-wrap:wrap}
 
-  /* ── Section headers ── */
-  .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-  .section-header h2 { font-size: 14px; font-weight: 600; }
-  .section-header .actions { display: flex; gap: 8px; }
+/* Buttons */
+.btn{padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);cursor:pointer;font-size:12px;transition:all .15s}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn.primary{background:var(--accent);color:#000;border-color:var(--accent);font-weight:600}
+.btn.primary:hover{background:#79b8ff}
+.btn.danger{border-color:var(--red);color:var(--red)}
+.btn.danger:hover{background:var(--red);color:#000}
 
-  /* ── Buttons ── */
-  .btn { padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; font-size: 12px; transition: all .15s; }
-  .btn:hover { border-color: var(--accent); color: var(--accent); }
-  .btn.primary { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 600; }
-  .btn.primary:hover { background: #79b8ff; }
-  .btn.danger { border-color: var(--red); color: var(--red); }
-  .btn.danger:hover { background: var(--red); color: #000; }
+/* Tables */
+.tw{overflow-x:auto}
+table{width:100%;border-collapse:collapse}
+th{background:var(--surface);color:var(--muted);font-weight:600;text-align:left;padding:7px 10px;font-size:11px;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border);position:sticky;top:0;z-index:1}
+td{padding:6px 10px;border-bottom:1px solid #1c2128}
+tr:hover td{background:#1c2128}
+.mono{font-family:monospace}
 
-  /* ── Research chart ── */
-  #creation-chart { width: 100%; height: 200px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 20px; position: relative; overflow: hidden; }
-  #creation-chart canvas { width: 100%; height: 100%; }
-  .chart-label { position: absolute; top: 10px; left: 14px; font-size: 11px; color: var(--muted); }
-  .chart-sublabel { position: absolute; top: 24px; left: 14px; font-size: 10px; color: #555; }
+/* Pills */
+.pill{display:inline-block;padding:2px 7px;border-radius:10px;font-size:11px;font-weight:600}
+.pill.green{background:#1c3a1c;color:var(--green)}
+.pill.yellow{background:#3a2c1c;color:var(--yellow)}
+.pill.red{background:#3a1c1c;color:var(--red)}
+.pill.blue{background:#1c2a3a;color:var(--accent)}
+.pill.gray{background:#222;color:var(--muted)}
+.pill.purple{background:#2a1c3a;color:#bc8cff}
 
-  /* ── Settings form ── */
-  .settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
-  .setting-row { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-  .setting-row .meta { flex: 1; }
-  .setting-row .meta .name { font-weight: 600; font-size: 13px; }
-  .setting-row .meta .desc { color: var(--muted); font-size: 11px; margin-top: 3px; }
-  .toggle { position: relative; display: inline-block; width: 40px; height: 22px; }
-  .toggle input { opacity: 0; width: 0; height: 0; }
-  .slider { position: absolute; inset: 0; background: #333; border-radius: 22px; cursor: pointer; transition: .2s; }
-  .slider:before { content: ""; position: absolute; height: 16px; width: 16px; left: 3px; bottom: 3px; background: #fff; border-radius: 50%; transition: .2s; }
-  input:checked + .slider { background: var(--accent); }
-  input:checked + .slider:before { transform: translateX(18px); }
-  .num-input { background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 5px 10px; width: 80px; font-size: 13px; text-align: right; }
-  .num-input:focus { outline: none; border-color: var(--accent); }
+/* Settings */
+.sg{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+.sr{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 14px;display:flex;align-items:center;justify-content:space-between;gap:10px}
+.sr .meta .name{font-weight:600;font-size:13px}
+.sr .meta .desc{color:var(--muted);font-size:11px;margin-top:2px}
+.toggle{position:relative;display:inline-block;width:38px;height:20px}
+.toggle input{opacity:0;width:0;height:0}
+.slider{position:absolute;inset:0;background:#333;border-radius:20px;cursor:pointer;transition:.2s}
+.slider:before{content:"";position:absolute;height:14px;width:14px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:.2s}
+input:checked+.slider{background:var(--accent)}
+input:checked+.slider:before{transform:translateX(18px)}
+.ni{background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 8px;width:75px;font-size:13px;text-align:right}
+.ni:focus{outline:none;border-color:var(--accent)}
 
-  /* ── Errors ── */
-  #errors-list { margin-top: 16px; }
-  .err-item { background: #1c1010; border: 1px solid #5a1a1a; border-radius: 6px; padding: 8px 12px; margin-bottom: 6px; font-size: 12px; display: flex; gap: 10px; }
-  .err-item .err-ts { color: var(--muted); flex-shrink: 0; }
-  .err-item .err-msg { color: var(--red); }
+/* Research chart */
+#creation-chart{width:100%;height:180px;background:var(--surface);border:1px solid var(--border);border-radius:8px;margin-bottom:16px;position:relative;overflow:hidden}
+#creation-chart canvas{position:absolute;inset:0;width:100%;height:100%}
+.chart-title{position:absolute;top:8px;left:12px;font-size:11px;color:var(--muted);z-index:2}
 
-  /* ── Log ── */
-  .log-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px; max-height: 300px; overflow-y: auto; }
-  .log-line { font-family: monospace; font-size: 11px; color: var(--muted); padding: 2px 0; border-bottom: 1px solid #1c2128; }
-  .log-line:last-child { border-bottom: none; }
-  .log-line .ts { color: #555; margin-right: 8px; }
-  .log-line .evt { color: var(--accent); margin-right: 6px; }
+/* Log */
+.logwrap{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px;max-height:260px;overflow-y:auto}
+.logline{font-family:monospace;font-size:11px;color:var(--muted);padding:2px 0;border-bottom:1px solid #1c2128}
+.logline:last-child{border-bottom:none}
+.logline .lts{color:#555;margin-right:8px}
+.logline .levt{color:var(--accent);margin-right:6px}
 
-  /* ── Empty state ── */
-  .empty { text-align: center; padding: 40px; color: var(--muted); font-size: 13px; }
-  .empty .icon { font-size: 32px; margin-bottom: 8px; }
+/* Errors */
+.err{background:#1c1010;border:1px solid #5a1a1a;border-radius:6px;padding:7px 10px;margin-bottom:5px;font-size:12px;display:flex;gap:8px}
+.err .ets{color:var(--muted);flex-shrink:0}
+.err .emsg{color:var(--red)}
 
-  /* ── Toast ── */
-  #toast { position: fixed; bottom: 24px; right: 24px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 16px; font-size: 13px; opacity: 0; transition: opacity .3s; pointer-events: none; z-index: 999; }
-  #toast.show { opacity: 1; }
-  #toast.ok  { border-color: var(--green); color: var(--green); }
-  #toast.err { border-color: var(--red);   color: var(--red); }
+/* Empty */
+.empty{text-align:center;padding:32px;color:var(--muted)}
+.empty .icon{font-size:28px;margin-bottom:8px}
 
-  /* ── Responsive ── */
-  @media (max-width: 600px) { .cards { grid-template-columns: 1fr 1fr; } nav button { padding: 8px 10px; font-size: 12px; } }
+/* Toast */
+#toast{position:fixed;bottom:20px;right:20px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:9px 14px;font-size:13px;opacity:0;transition:opacity .3s;pointer-events:none;z-index:999}
+#toast.show{opacity:1}
+#toast.ok{border-color:var(--green);color:var(--green)}
+#toast.err{border-color:var(--red);color:var(--red)}
+#toast.info{border-color:var(--accent);color:var(--accent)}
+
+/* Test results panel */
+#test-result{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;margin-top:12px;font-family:monospace;font-size:12px;white-space:pre-wrap;display:none;max-height:300px;overflow-y:auto}
 </style>
 </head>
 <body>
 
 <header>
   <h1>⚡ WeatherSpeed</h1>
-  <span id="phase-badge" class="IDLE">IDLE</span>
-  <span id="dry-badge">DRY RUN</span>
+  <span id="phase-badge" class="badge IDLE">IDLE</span>
+  <span id="ws-badge" class="badge">WS —</span>
+  <span id="dry-badge" class="badge">DRY RUN</span>
   <span id="server-ts">—</span>
 </header>
 
@@ -145,166 +139,163 @@
 
 <main>
 
-  <!-- ── Overview ── -->
-  <div id="tab-overview" class="tab-panel active">
-    <div class="cards">
-      <div class="card">
-        <div class="label">Phase</div>
-        <div class="value" id="ov-phase">—</div>
-        <div class="sub">Watch status</div>
-      </div>
-      <div class="card">
-        <div class="label">Markets Today</div>
-        <div class="value" id="ov-markets">—</div>
-        <div class="sub">Discovered buckets</div>
-      </div>
-      <div class="card">
-        <div class="label">Last Bid Run</div>
-        <div class="value" id="ov-bids">—</div>
-        <div class="sub">Bids in last cycle</div>
-      </div>
-      <div class="card">
-        <div class="label">Mode</div>
-        <div class="value" id="ov-mode">—</div>
-        <div class="sub">dry_run setting</div>
-      </div>
+<!-- ══════════════════════════════════════════════════════════════ OVERVIEW -->
+<div id="tab-overview" class="tab-panel active">
+  <div class="cards">
+    <div class="card">
+      <div class="label">Phase</div>
+      <div class="value" id="ov-phase">IDLE</div>
+      <div class="sub">Bot watch status</div>
     </div>
-
-    <div class="section-header">
-      <h2>Controls</h2>
-      <div class="actions">
-        <button class="btn" onclick="triggerRefreshMarkets()">🔄 Refresh Markets</button>
-        <button class="btn primary" onclick="triggerManualBid()">⚡ Manual Bid Cycle</button>
-      </div>
+    <div class="card">
+      <div class="label">WebSocket</div>
+      <div class="value" id="ov-ws">—</div>
+      <div class="sub" id="ov-ws-sub">disconnected</div>
     </div>
-
-    <div id="errors-list"></div>
-  </div>
-
-  <!-- ── Markets ── -->
-  <div id="tab-markets" class="tab-panel">
-    <div class="section-header">
-      <h2>Discovered Markets</h2>
-      <div class="actions">
-        <button class="btn" onclick="triggerRefreshMarkets()">🔄 Refresh</button>
-      </div>
+    <div class="card">
+      <div class="label">Markets</div>
+      <div class="value" id="ov-markets">—</div>
+      <div class="sub" id="ov-live-sub">discovered buckets</div>
     </div>
-    <div class="table-wrap">
-      <table id="markets-table">
-        <thead>
-          <tr>
-            <th>City / Series</th>
-            <th>Ticker</th>
-            <th>Bucket</th>
-            <th>NO Ask</th>
-            <th>YES Ask</th>
-            <th>Open Interest</th>
-            <th>Volume</th>
-            <th>Open Time</th>
-          </tr>
-        </thead>
-        <tbody id="markets-tbody"></tbody>
-      </table>
+    <div class="card">
+      <div class="label">Last Bid Run</div>
+      <div class="value" id="ov-bids">—</div>
+      <div class="sub">bids in last cycle</div>
     </div>
-    <div id="markets-empty" class="empty" style="display:none">
-      <div class="icon">🔍</div>
-      No markets discovered yet.<br>Markets are created ~09:31 UTC daily.
+    <div class="card">
+      <div class="label">Bids Fired Today</div>
+      <div class="value" id="ov-fired">—</div>
+      <div class="sub">live/dry run triggered</div>
+    </div>
+    <div class="card">
+      <div class="label">Mode</div>
+      <div class="value" id="ov-mode">—</div>
+      <div class="sub">dry_run setting</div>
     </div>
   </div>
 
-  <!-- ── Bid History ── -->
-  <div id="tab-history" class="tab-panel">
-    <div class="section-header">
-      <h2>Bid History</h2>
-      <div class="actions">
-        <label for="date-pick" style="color:var(--muted); font-size:12px">Date:</label>
-        <input type="date" id="date-pick" style="background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:5px 8px;font-size:12px"/>
-        <button class="btn" onclick="loadBids()">Go</button>
-      </div>
-    </div>
-    <div class="table-wrap">
-      <table id="bids-table">
-        <thead>
-          <tr>
-            <th>Event</th>
-            <th>Ticker</th>
-            <th>City</th>
-            <th>Bucket</th>
-            <th>NO Price</th>
-            <th>Contracts</th>
-            <th>OI at Bid</th>
-            <th>First?</th>
-            <th>ms After Open</th>
-            <th>Status</th>
-            <th>Dry?</th>
-          </tr>
-        </thead>
-        <tbody id="bids-tbody"></tbody>
-      </table>
-    </div>
-    <div id="bids-empty" class="empty" style="display:none">
-      <div class="icon">📋</div>
-      No bids recorded for this date.
+  <div class="sh">
+    <h2>Controls</h2>
+    <div class="acts">
+      <button class="btn" onclick="triggerRefreshMarkets()">🔄 Refresh Markets</button>
+      <button class="btn" onclick="triggerBackfill()">📥 Backfill Research</button>
+      <button class="btn" onclick="triggerTestBatch()">🧪 Test Batch</button>
+      <button class="btn primary" onclick="triggerManualBid()">⚡ Manual Bid Cycle</button>
     </div>
   </div>
 
-  <!-- ── Research ── -->
-  <div id="tab-research" class="tab-panel">
-    <div class="section-header">
-      <h2>Market Timing — Historical</h2>
-      <div class="sub" style="color:var(--muted); font-size:12px">All times UTC. Markets historically created 09:30–09:31, open at exactly 14:00:00.</div>
-    </div>
+  <div id="test-result"></div>
+  <div id="errors-list" style="margin-top:12px"></div>
+</div>
 
-    <div id="creation-chart">
-      <canvas id="timing-canvas"></canvas>
-      <div class="chart-label">Creation Time Distribution (seconds past 09:30:00 UTC)</div>
-      <div class="chart-sublabel">Each dot = one market creation event</div>
+<!-- ══════════════════════════════════════════════════════════════ MARKETS -->
+<div id="tab-markets" class="tab-panel">
+  <div class="sh">
+    <h2>Discovered Markets <span id="mkt-count" style="color:var(--muted);font-size:12px;font-weight:400"></span></h2>
+    <div class="acts">
+      <button class="btn" onclick="triggerRefreshMarkets()">🔄 Refresh</button>
     </div>
+  </div>
+  <p style="color:var(--muted);font-size:11px;margin-bottom:10px">
+    Prices marked <span class="pill blue" style="font-size:10px">WS</span> are live WebSocket data.
+    <span class="pill gray" style="font-size:10px">REST</span> = cached from discovery (~09:31 UTC).
+    NO ask = 100¢ − YES bid.
+  </p>
+  <div class="tw">
+    <table id="markets-table">
+      <thead><tr>
+        <th>City / Series</th><th>Ticker</th><th>Bucket</th>
+        <th>NO Ask</th><th>YES Ask</th><th>Open Interest</th>
+        <th>Volume</th><th>Data</th><th>First Bid</th>
+      </tr></thead>
+      <tbody id="markets-tbody"></tbody>
+    </table>
+  </div>
+  <div id="markets-empty" class="empty" style="display:none">
+    <div class="icon">🔍</div>
+    No markets discovered yet.<br>Markets are created ~09:31 UTC (5:31 AM ET) daily.
+  </div>
+</div>
 
-    <div class="table-wrap" style="margin-bottom:20px">
-      <table id="timing-table">
-        <thead>
-          <tr>
-            <th>Settlement Date</th>
-            <th>City</th>
-            <th>Kind</th>
-            <th>Series</th>
-            <th>Event Ticker</th>
-            <th>Created Time (UTC)</th>
-            <th>Secs Past 09:30</th>
-            <th>Open Time (UTC)</th>
-          </tr>
-        </thead>
-        <tbody id="timing-tbody"></tbody>
-      </table>
+<!-- ══════════════════════════════════════════════════════════════ BID HISTORY -->
+<div id="tab-history" class="tab-panel">
+  <div class="sh">
+    <h2>Bid History</h2>
+    <div class="acts">
+      <label style="color:var(--muted);font-size:12px">Date (ET):</label>
+      <input type="date" id="date-pick" style="background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 8px;font-size:12px"/>
+      <button class="btn" onclick="loadBids()">Go</button>
     </div>
+  </div>
+  <div class="tw">
+    <table>
+      <thead><tr>
+        <th>Time (UTC)</th><th>Ticker</th><th>City</th><th>Bucket</th>
+        <th>NO Price</th><th>Qty</th><th>OI at Bid</th>
+        <th>First?</th><th>ms After Open</th><th>Status</th><th>Dry?</th>
+      </tr></thead>
+      <tbody id="bids-tbody"></tbody>
+    </table>
+  </div>
+  <div id="bids-empty" class="empty" style="display:none">
+    <div class="icon">📋</div>
+    No bids recorded for this date.
+  </div>
+</div>
 
-    <div class="section-header" style="margin-top:20px">
-      <h2>Session Log</h2>
+<!-- ══════════════════════════════════════════════════════════════ RESEARCH -->
+<div id="tab-research" class="tab-panel">
+  <div class="sh">
+    <h2>Market Timing — Historical</h2>
+    <div class="acts">
+      <button class="btn" onclick="triggerBackfill()">📥 Backfill 7 Days</button>
+      <button class="btn" onclick="loadResearch()">🔄 Refresh</button>
     </div>
-    <div class="log-wrap" id="session-log"></div>
+  </div>
+  <p style="color:var(--muted);font-size:11px;margin-bottom:10px">
+    Markets created ~09:30–09:31 UTC (5:30 AM ET) · Open at exactly 14:00:00 UTC (10:00 AM ET).
+    <strong style="color:var(--text)">First Bid</strong> = first time open interest went non-zero on any bucket (detected via WebSocket from today onward; historical = unavailable).
+  </p>
+
+  <div id="creation-chart">
+    <canvas id="timing-canvas"></canvas>
+    <div class="chart-title">Creation time offset from 09:30:00 UTC (seconds) — red=HIGH, blue=LOW</div>
   </div>
 
-  <!-- ── Settings ── -->
-  <div id="tab-settings" class="tab-panel">
-    <div class="section-header">
-      <h2>Runtime Settings</h2>
-      <div class="actions">
-        <button class="btn primary" onclick="saveSettings()">💾 Save All</button>
-      </div>
-    </div>
-    <div class="settings-grid" id="settings-grid"></div>
+  <div class="tw" style="margin-bottom:20px">
+    <table id="timing-table">
+      <thead><tr>
+        <th>Settlement</th><th>City</th><th>Kind</th><th>Series</th>
+        <th>Created (UTC)</th><th>Secs Past 09:30</th><th>Open (UTC)</th>
+        <th>First Bid (UTC)</th>
+      </tr></thead>
+      <tbody id="timing-tbody"></tbody>
+    </table>
   </div>
+
+  <div class="sh" style="margin-top:16px"><h2>Session Log</h2></div>
+  <div class="logwrap" id="session-log"></div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════ SETTINGS -->
+<div id="tab-settings" class="tab-panel">
+  <div class="sh">
+    <h2>Runtime Settings</h2>
+    <div class="acts">
+      <button class="btn primary" onclick="saveSettings()">💾 Save All</button>
+    </div>
+  </div>
+  <p style="color:var(--muted);font-size:11px;margin-bottom:14px">
+    Changes take effect immediately without restart.
+    Settings are reset to defaults if the service restarts.
+  </p>
+  <div class="sg" id="settings-grid"></div>
+</div>
 
 </main>
-
 <div id="toast"></div>
 
 <script>
-// ── State ────────────────────────────────────────────────────────────────────
-let _settings = {};
-let _pollInterval = null;
-
 // ── Tabs ─────────────────────────────────────────────────────────────────────
 document.querySelectorAll("nav button").forEach(btn => {
   btn.addEventListener("click", () => {
@@ -313,7 +304,7 @@ document.querySelectorAll("nav button").forEach(btn => {
     btn.classList.add("active");
     document.getElementById("tab-" + btn.dataset.tab).classList.add("active");
     if (btn.dataset.tab === "research") loadResearch();
-    if (btn.dataset.tab === "history") loadBids();
+    if (btn.dataset.tab === "history")  loadBids();
     if (btn.dataset.tab === "settings") loadSettings();
   });
 });
@@ -324,91 +315,100 @@ function toast(msg, type="ok") {
   el.textContent = msg;
   el.className = "show " + type;
   clearTimeout(el._t);
-  el._t = setTimeout(() => el.className = "", 2800);
+  el._t = setTimeout(() => el.className = "", 3000);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function fmt_ts(iso) {
+function fmtUTC(iso) {
   if (!iso) return "—";
-  try {
-    const d = new Date(iso);
-    return d.toISOString().replace("T", " ").slice(0, 19) + " UTC";
-  } catch { return iso; }
+  try { return new Date(iso).toISOString().replace("T"," ").slice(0,19) + " UTC"; }
+  catch { return iso; }
 }
-
-function fmt_cents(c) {
-  if (c === undefined || c === null) return "—";
-  return c + "¢";
-}
-
-function epoch_to_hms(ts) {
+function fmtMS(ts) {
   if (!ts) return "—";
-  const d = new Date(ts * 1000);
-  return d.toISOString().slice(11, 19) + " UTC";
+  try { return new Date(ts * 1000).toISOString().replace("T"," ").slice(0,19) + " UTC"; }
+  catch { return "—"; }
 }
-
-// ── API calls ─────────────────────────────────────────────────────────────────
+function fmtMSepoch(ms) {
+  if (!ms) return "—";
+  try { return new Date(ms).toISOString().replace("T"," ").slice(0,22) + " UTC"; }
+  catch { return "—"; }
+}
 async function api(path, opts={}) {
   const r = await fetch(path, opts);
   if (!r.ok) throw new Error(r.statusText);
   return r.json();
 }
 
-// ── Overview poll ─────────────────────────────────────────────────────────────
+// ── State poll ────────────────────────────────────────────────────────────────
 async function pollState() {
   try {
     const s = await api("/api/state");
 
     // Header badges
     const pb = document.getElementById("phase-badge");
-    pb.textContent = s.watch_phase;
-    pb.className   = s.watch_phase;
+    pb.textContent = s.watch_phase; pb.className = "badge " + s.watch_phase;
 
     const db = document.getElementById("dry-badge");
-    db.textContent = s.dry_run ? "DRY RUN" : "LIVE";
-    db.className   = s.dry_run ? "" : "live";
+    db.textContent = s.dry_run ? "DRY RUN" : "🔴 LIVE";
+    db.className   = s.dry_run ? "badge" : "badge live";
+
+    const wb  = document.getElementById("ws-badge");
+    const ws  = s.ws || {};
+    const wsc = ws.connected;
+    wb.textContent = wsc ? `WS ✓ ${ws.tickers}t` : "WS ✗";
+    wb.className   = wsc ? "badge connected" : "badge";
 
     document.getElementById("server-ts").textContent =
-      s.server_ts ? "updated " + epoch_to_hms(s.server_ts) : "";
+      s.server_ts ? "sync " + new Date(s.server_ts * 1000).toISOString().slice(11,19) + " UTC" : "";
 
-    // Cards
+    // Overview cards
     document.getElementById("ov-phase").textContent   = s.watch_phase;
+    document.getElementById("ov-ws").textContent      = wsc ? "CONNECTED" : "OFFLINE";
+    document.getElementById("ov-ws").style.color      = wsc ? "var(--accent)" : "var(--muted)";
+    document.getElementById("ov-ws-sub").textContent  = wsc ? ws.tickers + " tickers subscribed" : "will connect at 09:27 UTC";
     document.getElementById("ov-markets").textContent = s.markets.length;
+    const liveCnt = s.markets.filter(m => m.ws_live).length;
+    document.getElementById("ov-live-sub").textContent = liveCnt > 0 ? liveCnt + " with live WS prices" : "discovered buckets";
     document.getElementById("ov-bids").textContent    = s.last_bid_count;
+    document.getElementById("ov-fired").textContent   = s.bids_fired_today ? "YES" : "no";
+    document.getElementById("ov-fired").style.color   = s.bids_fired_today ? "var(--green)" : "var(--muted)";
     document.getElementById("ov-mode").textContent    = s.dry_run ? "DRY RUN" : "LIVE";
+    document.getElementById("ov-mode").style.color    = s.dry_run ? "var(--yellow)" : "var(--red)";
 
-    // Markets table (keep fresh even when not on markets tab)
+    // Markets table (keep live regardless of active tab)
+    document.getElementById("mkt-count").textContent =
+      s.markets.length ? `(${s.markets.length} buckets, ${liveCnt} live)` : "";
     renderMarketsTable(s.markets);
-
-    // Errors
     renderErrors(s.errors || []);
-  } catch (e) {
-    console.error("pollState:", e);
-  }
+  } catch(e) { console.error("poll:", e); }
 }
 
 function renderMarketsTable(markets) {
-  const tbody  = document.getElementById("markets-tbody");
-  const empty  = document.getElementById("markets-empty");
-  if (!markets.length) {
-    tbody.innerHTML = "";
-    empty.style.display = "";
-    return;
-  }
+  const tbody = document.getElementById("markets-tbody");
+  const empty = document.getElementById("markets-empty");
+  if (!markets.length) { tbody.innerHTML = ""; empty.style.display = ""; return; }
   empty.style.display = "none";
   tbody.innerHTML = markets.map(m => {
-    const oi_pill = m.open_interest === 0
+    const oiPill = m.open_interest === 0
       ? '<span class="pill green">0 — first!</span>'
-      : '<span class="pill gray">' + m.open_interest.toFixed(0) + '</span>';
+      : `<span class="pill gray">${m.open_interest.toFixed(0)}</span>`;
+    const dataPill = m.ws_live
+      ? '<span class="pill blue">WS</span>'
+      : '<span class="pill gray">REST</span>';
+    const fbPill = m.first_bid_ts
+      ? `<span class="pill yellow">${fmtMSepoch(m.first_bid_ts)}</span>`
+      : '<span style="color:var(--muted)">—</span>';
     return `<tr>
-      <td>${m.event_ticker.split("-")[0]}</td>
-      <td class="mono" style="font-size:11px">${m.ticker}</td>
-      <td>${m.bucket || "—"}</td>
-      <td>${fmt_cents(m.no_ask_cents)}</td>
-      <td>${fmt_cents(m.yes_ask_cents)}</td>
-      <td>${oi_pill}</td>
-      <td>${m.volume.toFixed(0)}</td>
-      <td style="font-size:11px">${fmt_ts(m.open_time)}</td>
+      <td>${(m.event_ticker||"").split("-")[0]}</td>
+      <td class="mono" style="font-size:10px">${m.ticker}</td>
+      <td>${m.bucket||"—"}</td>
+      <td><strong>${m.no_ask_cents}¢</strong></td>
+      <td>${m.yes_ask_cents}¢</td>
+      <td>${oiPill}</td>
+      <td>${(m.volume||0).toFixed(0)}</td>
+      <td>${dataPill}</td>
+      <td style="font-size:11px">${fbPill}</td>
     </tr>`;
   }).join("");
 }
@@ -417,7 +417,7 @@ function renderErrors(errors) {
   const el = document.getElementById("errors-list");
   if (!errors.length) { el.innerHTML = ""; return; }
   el.innerHTML = errors.slice().reverse().map(e =>
-    `<div class="err-item"><span class="err-ts">${e.ts}</span><span class="err-msg">${e.msg}</span></div>`
+    `<div class="err"><span class="ets">${e.ts}</span><span class="emsg">${e.msg}</span></div>`
   ).join("");
 }
 
@@ -425,295 +425,256 @@ function renderErrors(errors) {
 async function loadBids() {
   const dp = document.getElementById("date-pick");
   if (!dp.value) {
-    // Default to today ET (UTC-4)
-    const et = new Date(Date.now() - 4*3600*1000);
-    dp.value = et.toISOString().slice(0, 10);
+    dp.value = new Date(Date.now() - 4*3600000).toISOString().slice(0,10);
   }
   try {
     const d = await api("/api/bids?date=" + dp.value);
-    renderBidsTable(d.bids);
-  } catch (e) {
-    toast("Failed to load bids: " + e.message, "err");
-  }
-}
-
-function renderBidsTable(bids) {
-  const tbody = document.getElementById("bids-tbody");
-  const empty = document.getElementById("bids-empty");
-  if (!bids.length) {
-    tbody.innerHTML = "";
-    empty.style.display = "";
-    return;
-  }
-  empty.style.display = "none";
-  tbody.innerHTML = bids.map(b => {
-    const firstPill = b.was_first   // SQLite returns 0/1
-      ? '<span class="pill green">✓ FIRST</span>'
-      : '<span class="pill gray">no</span>';
-    const statusPill = b.status === "placed"
-      ? '<span class="pill green">placed</span>'
-      : '<span class="pill red">' + (b.status || "?") + '</span>';
-    const dryPill = b.dry_run
-      ? '<span class="pill yellow">dry</span>'
-      : '<span class="pill blue">live</span>';
-    return `<tr>
-      <td class="mono" style="font-size:11px">${b.event_ticker || "—"}</td>
-      <td class="mono" style="font-size:11px">${b.ticker || "—"}</td>
-      <td>${b.city || "—"}</td>
-      <td>${b.bucket_label || "—"}</td>
-      <td>${fmt_cents(b.no_price_cents)}</td>
-      <td>${b.contracts}</td>
-      <td>${b.open_interest}</td>
-      <td>${firstPill}</td>
-      <td>${b.ms_after_open !== null ? b.ms_after_open + " ms" : "—"}</td>
-      <td>${statusPill}</td>
-      <td>${dryPill}</td>
-    </tr>`;
-  }).join("");
+    const tbody = document.getElementById("bids-tbody");
+    const empty = document.getElementById("bids-empty");
+    if (!d.bids.length) { tbody.innerHTML=""; empty.style.display=""; return; }
+    empty.style.display = "none";
+    tbody.innerHTML = d.bids.map(b => {
+      const fp = b.was_first ? '<span class="pill green">✓ FIRST</span>' : '<span class="pill gray">—</span>';
+      const st = b.status==="placed" ? '<span class="pill green">placed</span>'
+               : `<span class="pill red">${b.status||"?"}</span>`;
+      const dr = b.dry_run ? '<span class="pill yellow">dry</span>' : '<span class="pill blue">live</span>';
+      const ts = b.placed_at ? b.placed_at.replace("T"," ").slice(0,19) : "—";
+      return `<tr>
+        <td class="mono" style="font-size:11px">${ts}</td>
+        <td class="mono" style="font-size:10px">${b.ticker||"—"}</td>
+        <td>${b.city||"—"}</td>
+        <td>${b.bucket_label||"—"}</td>
+        <td><strong>${b.no_price_cents||0}¢</strong></td>
+        <td>${b.contracts||1}</td>
+        <td>${b.open_interest||0}</td>
+        <td>${fp}</td>
+        <td>${b.ms_after_open!=null ? b.ms_after_open+"ms" : "—"}</td>
+        <td>${st}</td>
+        <td>${dr}</td>
+      </tr>`;
+    }).join("");
+  } catch(e) { toast("Bids load failed: "+e.message,"err"); }
 }
 
 // ── Research ──────────────────────────────────────────────────────────────────
 async function loadResearch() {
   try {
     const d = await api("/api/research");
-    renderTimingTable(d.timing || []);
-    renderTimingChart(d.timing || []);
-    renderSessionLog(d.log || []);
-  } catch (e) {
-    toast("Failed to load research: " + e.message, "err");
-  }
+    renderTimingTable(d.timing||[]);
+    renderTimingChart(d.timing||[]);
+    renderSessionLog(d.log||[]);
+  } catch(e) { toast("Research load failed: "+e.message,"err"); }
 }
 
 function renderTimingTable(rows) {
   const tbody = document.getElementById("timing-tbody");
   if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:24px">No timing data yet. Data populates as markets are discovered.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:20px">
+      No data yet. Click "Backfill 7 Days" to pull historical market data.</td></tr>`;
     return;
   }
   tbody.innerHTML = rows.map(r => {
-    const created = r.created_time || "";
     let secsPast = "—";
-    if (created) {
+    if (r.created_time) {
       try {
-        const dt = new Date(created);
-        const ref = new Date(dt);
-        ref.setUTCHours(9, 30, 0, 0);
-        secsPast = ((dt - ref) / 1000).toFixed(1) + "s";
+        const dt  = new Date(r.created_time);
+        const ref = new Date(dt); ref.setUTCHours(9,30,0,0);
+        secsPast  = ((dt-ref)/1000).toFixed(1)+"s";
       } catch {}
     }
-    const kindPill = r.kind === "high"
+    const kp = r.kind==="high"
       ? '<span class="pill red">HIGH</span>'
       : '<span class="pill blue">LOW</span>';
+    const fbTime = r.first_bucket_bid_time || r.first_bid_time;
     return `<tr>
-      <td>${r.settlement_date || "—"}</td>
-      <td>${r.city || "—"}</td>
-      <td>${kindPill}</td>
-      <td class="mono" style="font-size:11px">${r.series_ticker || "—"}</td>
-      <td class="mono" style="font-size:11px">${r.event_ticker || "—"}</td>
-      <td class="mono" style="font-size:11px">${fmt_ts(r.created_time)}</td>
+      <td>${r.settlement_date||"—"}</td>
+      <td>${r.city||"—"}</td>
+      <td>${kp}</td>
+      <td class="mono" style="font-size:10px">${r.series_ticker||"—"}</td>
+      <td class="mono" style="font-size:11px">${fmtUTC(r.created_time)}</td>
       <td style="font-variant-numeric:tabular-nums">${secsPast}</td>
-      <td class="mono" style="font-size:11px">${fmt_ts(r.open_time)}</td>
+      <td class="mono" style="font-size:11px">${fmtUTC(r.open_time)}</td>
+      <td class="mono" style="font-size:11px">${fbTime ? fmtUTC(fbTime) : '<span style="color:var(--muted)">—</span>'}</td>
     </tr>`;
   }).join("");
 }
 
 function renderTimingChart(rows) {
   const canvas = document.getElementById("timing-canvas");
-  const ctx    = canvas.getContext("2d");
-  const W = canvas.offsetWidth  || 800;
-  const H = canvas.offsetHeight || 200;
-  canvas.width  = W;
-  canvas.height = H;
+  const W = canvas.parentElement.offsetWidth || 800;
+  const H = 180;
+  canvas.width  = W; canvas.height = H;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#161b22"; ctx.fillRect(0,0,W,H);
 
-  ctx.clearRect(0, 0, W, H);
-  ctx.fillStyle = "#161b22";
-  ctx.fillRect(0, 0, W, H);
-
-  if (!rows.length) {
-    ctx.fillStyle = "#555";
-    ctx.font = "13px monospace";
-    ctx.textAlign = "center";
-    ctx.fillText("No data yet", W/2, H/2);
-    return;
-  }
-
-  // Compute seconds past 09:30:00 for each row
-  const points = [];
+  const pts = [];
   rows.forEach(r => {
     if (!r.created_time) return;
     try {
       const dt  = new Date(r.created_time);
-      const ref = new Date(dt);
-      ref.setUTCHours(9, 30, 0, 0);
-      const secs = (dt - ref) / 1000;
-      points.push({ secs, city: r.city, kind: r.kind, date: r.settlement_date });
+      const ref = new Date(dt); ref.setUTCHours(9,30,0,0);
+      pts.push({secs:(dt-ref)/1000, kind:r.kind, city:r.city, date:r.settlement_date});
     } catch {}
   });
 
-  if (!points.length) return;
-
-  const minS = Math.min(...points.map(p => p.secs));
-  const maxS = Math.max(...points.map(p => p.secs));
-  const range = Math.max(maxS - minS, 60);  // at least 60s window
-  const padL = 50, padR = 20, padT = 30, padB = 30;
-  const plotW = W - padL - padR;
-  const plotH = H - padT - padB;
-
-  // Grid lines every 10s
-  ctx.strokeStyle = "#222";
-  ctx.lineWidth   = 1;
-  for (let s = Math.floor(minS / 10) * 10; s <= maxS + 10; s += 10) {
-    const x = padL + ((s - minS) / range) * plotW;
-    ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, padT + plotH); ctx.stroke();
-    ctx.fillStyle = "#555";
-    ctx.font = "10px monospace";
-    ctx.textAlign = "center";
-    ctx.fillText("+" + s.toFixed(0) + "s", x, padT + plotH + 16);
+  if (!pts.length) {
+    ctx.fillStyle="#555"; ctx.font="12px monospace"; ctx.textAlign="center";
+    ctx.fillText("No timing data — click Backfill 7 Days", W/2, H/2);
+    return;
   }
 
-  // Reference line at 0s (09:30:00)
-  const x0 = padL + ((0 - minS) / range) * plotW;
-  if (x0 >= padL && x0 <= padL + plotW) {
-    ctx.strokeStyle = "#555";
-    ctx.setLineDash([4, 4]);
-    ctx.beginPath(); ctx.moveTo(x0, padT); ctx.lineTo(x0, padT + plotH); ctx.stroke();
-    ctx.setLineDash([]);
-  }
+  const minS = Math.min(...pts.map(p=>p.secs));
+  const maxS = Math.max(...pts.map(p=>p.secs));
+  const range = Math.max(maxS-minS,60);
+  const pL=55,pR=20,pT=32,pB=28;
+  const pW=W-pL-pR, pH=H-pT-pB;
 
-  // Scatter dots — jitter on Y axis so overlapping dots are visible
-  const jitterMap = {};
-  points.forEach((p, i) => {
-    const key = p.secs.toFixed(1);
-    jitterMap[key] = (jitterMap[key] || 0) + 1;
-    const x = padL + ((p.secs - minS) / range) * plotW;
-    const y = padT + plotH * 0.2 + (jitterMap[key] - 1) * 14;
-    ctx.beginPath();
-    ctx.arc(x, Math.min(y, padT + plotH - 6), 5, 0, Math.PI * 2);
-    ctx.fillStyle = p.kind === "high" ? "#f85149" : "#58a6ff";
+  // Grid
+  ctx.strokeStyle="#222"; ctx.lineWidth=1;
+  for(let s=Math.floor(minS/10)*10; s<=maxS+10; s+=10) {
+    const x = pL+(s-minS)/range*pW;
+    ctx.beginPath(); ctx.moveTo(x,pT); ctx.lineTo(x,pT+pH); ctx.stroke();
+    ctx.fillStyle="#555"; ctx.font="10px monospace"; ctx.textAlign="center";
+    ctx.fillText("+"+s.toFixed(0)+"s", x, pT+pH+18);
+  }
+  // Y axis label
+  ctx.fillStyle="#444"; ctx.font="10px monospace"; ctx.textAlign="right";
+  ctx.fillText("09:30", pL-4, pT+10);
+
+  // Dots
+  const jmap={};
+  pts.forEach(p => {
+    const k = p.secs.toFixed(1);
+    jmap[k] = (jmap[k]||0)+1;
+    const x = pL+(p.secs-minS)/range*pW;
+    const y = Math.min(pT+pH-6, pT+10+(jmap[k]-1)*13);
+    ctx.beginPath(); ctx.arc(x,y,5,0,Math.PI*2);
+    ctx.fillStyle = p.kind==="high"?"#f85149":"#58a6ff";
     ctx.fill();
   });
 
   // Legend
-  ctx.fillStyle = "#f85149"; ctx.beginPath(); ctx.arc(padL, padT - 12, 5, 0, Math.PI*2); ctx.fill();
-  ctx.fillStyle = "#aaa"; ctx.font = "11px monospace"; ctx.textAlign = "left";
-  ctx.fillText("HIGH", padL + 10, padT - 8);
-  ctx.fillStyle = "#58a6ff"; ctx.beginPath(); ctx.arc(padL + 60, padT - 12, 5, 0, Math.PI*2); ctx.fill();
-  ctx.fillStyle = "#aaa"; ctx.fillText("LOW", padL + 70, padT - 8);
+  [{c:"#f85149",l:"HIGH"},{c:"#58a6ff",l:"LOW"}].forEach(({c,l},i) => {
+    const lx = pL+i*60;
+    ctx.fillStyle=c; ctx.beginPath(); ctx.arc(lx,pT-14,5,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle="#aaa"; ctx.font="11px monospace"; ctx.textAlign="left";
+    ctx.fillText(l, lx+10, pT-10);
+  });
+  ctx.fillStyle="#888"; ctx.font="11px monospace"; ctx.textAlign="right";
+  ctx.fillText(`n=${pts.length}`, W-pR, pT-10);
 }
 
 function renderSessionLog(log) {
   const el = document.getElementById("session-log");
-  if (!log.length) {
-    el.innerHTML = '<div class="log-line" style="text-align:center;padding:16px">No log entries yet.</div>';
-    return;
-  }
+  if (!log.length) { el.innerHTML='<div class="logline" style="text-align:center;padding:12px">No log entries</div>'; return; }
   el.innerHTML = log.slice().reverse().map(l =>
-    `<div class="log-line"><span class="ts">${l.ts || ""}</span><span class="evt">${l.event || ""}</span>${l.detail || ""}</div>`
+    `<div class="logline"><span class="lts">${(l.ts||"").slice(0,19)}</span><span class="levt">${l.event||""}</span>${l.detail||""}</div>`
   ).join("");
 }
 
 // ── Settings ──────────────────────────────────────────────────────────────────
-const SETTING_META = {
-  dry_run:                    { label: "Dry Run",               desc: "Simulate bids without placing real orders",         type: "bool" },
-  auto_bid_enabled:           { label: "Auto-Bid Enabled",      desc: "Automatically fire bids at market open (14:00 UTC)", type: "bool" },
-  bid_only_zero_oi:           { label: "First-Only Mode",       desc: "Only bid when open interest = 0 (you are first)",   type: "bool" },
-  track_market_timing:        { label: "Track Timing",          desc: "Record market creation/open times to DB",            type: "bool" },
-  contracts_per_market:       { label: "Contracts / Market",    desc: "Number of contracts to bid per bucket",              type: "int",  min: 1, max: 100 },
-  max_no_price_cents:         { label: "Max NO Price (¢)",      desc: "Skip if NO ask is above this price in cents",        type: "int",  min: 1, max: 99  },
-  min_no_price_cents:         { label: "Min NO Price (¢)",      desc: "Skip if NO ask is below this price in cents",        type: "int",  min: 1, max: 99  },
-  batch_size:                 { label: "Batch Size",             desc: "Orders per batch POST request (Kalshi limit ~30)",   type: "int",  min: 1, max: 30  },
-  batch_concurrency:          { label: "Batch Concurrency",      desc: "Max simultaneous batch requests in flight (1–3)",    type: "int",  min: 1, max: 5   },
-  creation_poll_interval_secs:{ label: "Poll Interval (sec)",   desc: "Seconds between creation-watch polls",               type: "int",  min: 1, max: 60  },
-  creation_poll_start_utc_hour:  { label: "Watch Start Hour (UTC)",   desc: "UTC hour to begin creation polling",           type: "int",  min: 0, max: 23  },
-  creation_poll_start_utc_minute:{ label: "Watch Start Min (UTC)",    desc: "UTC minute to begin creation polling",         type: "int",  min: 0, max: 59  },
-  open_time_utc_hour:         { label: "Open Trigger Hour (UTC)", desc: "UTC hour to fire the bid cycle",                   type: "int",  min: 0, max: 23  },
-  open_time_utc_minute:       { label: "Open Trigger Min (UTC)",  desc: "UTC minute to fire the bid cycle",                 type: "int",  min: 0, max: 59  },
+const SMETA = {
+  dry_run:             {l:"Dry Run",            d:"Simulate bids — never place real orders",                 t:"bool"},
+  auto_bid_enabled:    {l:"Auto-Bid Enabled",   d:"Fire bids automatically at market open (14:00 UTC)",      t:"bool"},
+  bid_only_zero_oi:    {l:"First-Only Mode",    d:"Only bid when open interest = 0 (you are first in)",      t:"bool"},
+  track_market_timing: {l:"Track Timing",       d:"Record market creation + open times to DB",               t:"bool"},
+  contracts_per_market:{l:"Contracts / Market", d:"Number of NO contracts per bucket",                       t:"int", min:1, max:100},
+  max_no_price_cents:  {l:"Max NO Price (¢)",   d:"Skip if NO ask > this cents (70 = 70¢)",                  t:"int", min:1, max:99},
+  min_no_price_cents:  {l:"Min NO Price (¢)",   d:"Skip if NO ask < this cents",                             t:"int", min:1, max:99},
+  batch_size:          {l:"Batch Size",         d:"Orders per batch POST (Kalshi limit ≈30; 192÷30=7 chunks)",t:"int", min:1, max:30},
+  batch_concurrency:   {l:"Batch Concurrency",  d:"Simultaneous batch requests in flight (1–3 recommended)", t:"int", min:1, max:5},
+  creation_poll_interval_secs:{l:"Poll Interval (s)",d:"Seconds between creation-watch REST polls",          t:"int", min:1, max:60},
+  creation_poll_start_utc_hour:  {l:"Watch Start Hour",  d:"UTC hour to begin creation polling (default 9)", t:"int", min:0, max:23},
+  creation_poll_start_utc_minute:{l:"Watch Start Min",   d:"UTC minute to begin polling (default 28)",       t:"int", min:0, max:59},
+  open_time_utc_hour:  {l:"Open Trigger Hour",  d:"UTC hour for timer fallback trigger (default 14)",        t:"int", min:0, max:23},
+  open_time_utc_minute:{l:"Open Trigger Min",   d:"UTC minute for timer fallback (fires at +5s)",            t:"int", min:0, max:59},
 };
 
 async function loadSettings() {
   try {
-    const d = await api("/api/settings");
-    _settings = d;
-    renderSettings(d);
-  } catch (e) {
-    toast("Failed to load settings: " + e.message, "err");
-  }
-}
-
-function renderSettings(s) {
-  const grid = document.getElementById("settings-grid");
-  grid.innerHTML = Object.entries(SETTING_META).map(([k, meta]) => {
-    const val = s[k];
-    let control = "";
-    if (meta.type === "bool") {
-      control = `<label class="toggle">
-        <input type="checkbox" id="s_${k}" ${val ? "checked" : ""}/>
-        <span class="slider"></span>
-      </label>`;
-    } else {
-      control = `<input class="num-input" type="number" id="s_${k}" value="${val ?? ""}" min="${meta.min||0}" max="${meta.max||9999}"/>`;
-    }
-    return `<div class="setting-row">
-      <div class="meta">
-        <div class="name">${meta.label}</div>
-        <div class="desc">${meta.desc}</div>
-      </div>
-      ${control}
-    </div>`;
-  }).join("");
+    const s = await api("/api/settings");
+    const grid = document.getElementById("settings-grid");
+    grid.innerHTML = Object.entries(SMETA).map(([k,m]) => {
+      const v = s[k];
+      const ctrl = m.t==="bool"
+        ? `<label class="toggle"><input type="checkbox" id="s_${k}" ${v?"checked":""}><span class="slider"></span></label>`
+        : `<input class="ni" type="number" id="s_${k}" value="${v??""}" min="${m.min||0}" max="${m.max||9999}">`;
+      return `<div class="sr"><div class="meta"><div class="name">${m.l}</div><div class="desc">${m.d}</div></div>${ctrl}</div>`;
+    }).join("");
+  } catch(e) { toast("Settings load failed","err"); }
 }
 
 async function saveSettings() {
-  const payload = {};
-  for (const [k, meta] of Object.entries(SETTING_META)) {
-    const el = document.getElementById("s_" + k);
+  const p = {};
+  for(const [k,m] of Object.entries(SMETA)) {
+    const el = document.getElementById("s_"+k);
     if (!el) continue;
-    if (meta.type === "bool") {
-      payload[k] = el.checked;
-    } else {
-      payload[k] = parseInt(el.value, 10);
-    }
+    p[k] = m.t==="bool" ? el.checked : parseInt(el.value,10);
   }
   try {
-    await api("/api/settings", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    _settings = payload;
-    toast("Settings saved ✓", "ok");
-  } catch (e) {
-    toast("Save failed: " + e.message, "err");
-  }
+    await api("/api/settings", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(p)});
+    toast("Settings saved ✓","ok");
+  } catch(e) { toast("Save failed: "+e.message,"err"); }
 }
 
-// ── Manual triggers ───────────────────────────────────────────────────────────
+// ── Trigger actions ───────────────────────────────────────────────────────────
 async function triggerManualBid() {
   if (!confirm("Fire a bid cycle right now?")) return;
-  try {
-    const r = await api("/api/manual-trigger");
-    toast(r.msg, "ok");
-  } catch (e) {
-    toast("Error: " + e.message, "err");
-  }
+  try { const r=await api("/api/manual-trigger"); toast(r.msg,"ok"); }
+  catch(e) { toast("Error: "+e.message,"err"); }
 }
 
 async function triggerRefreshMarkets() {
+  try { const r=await api("/api/refresh-markets"); toast(r.msg,"ok"); }
+  catch(e) { toast("Error: "+e.message,"err"); }
+}
+
+async function triggerBackfill() {
+  toast("Backfill started — may take ~30s…","info");
   try {
-    const r = await api("/api/refresh-markets");
-    toast(r.msg, "ok");
-  } catch (e) {
-    toast("Error: " + e.message, "err");
+    const r = await api("/api/backfill-research");
+    toast(`Backfill done: ${r.inserted||0} events, ${r.skipped||0} skipped`,"ok");
+    if (document.querySelector("nav button.active").dataset.tab==="research") loadResearch();
+  } catch(e) { toast("Backfill failed: "+e.message,"err"); }
+}
+
+async function triggerTestBatch() {
+  const panel = document.getElementById("test-result");
+  panel.style.display="block";
+  panel.textContent = "Running connectivity test…";
+  try {
+    const r = await api("/api/test-batch");
+    const ws = r.ws||{};
+    panel.textContent = [
+      "=== Batch Connectivity Test ===",
+      `Auth / Balance:    ${r.balance_dollars!=null ? "$"+r.balance_dollars.toFixed(2) : "ERROR: "+r.balance_error}`,
+      `Markets found:     ${r.markets_found}`,
+      `Market fetch:      ${r.fetch_ms}ms`,
+      "",
+      "=== Batch Plan (at open with 192 potential orders) ===",
+      `Total markets:     ${r.batch_plan?.total_markets}`,
+      `Batch size:        ${r.batch_plan?.batch_size} orders/chunk`,
+      `Concurrency:       ${r.batch_plan?.batch_concurrency} simultaneous`,
+      `Chunks:            ${r.batch_plan?.chunks}`,
+      `HTTP rounds:       ${r.batch_plan?.estimated_rounds} × RTT`,
+      "",
+      "=== WebSocket Status ===",
+      `Connected:         ${ws.connected?"YES":"NO"}`,
+      `Tickers:           ${ws.tickers||0}`,
+      `Last message:      ${ws.last_msg_ts ? new Date(ws.last_msg_ts*1000).toISOString().slice(11,22)+" UTC" : "never"}`,
+      "",
+      `Total test time:   ${r.total_ms}ms`,
+    ].join("\n");
+  } catch(e) {
+    panel.textContent = "TEST FAILED: "+e.message;
   }
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 pollState();
-_pollInterval = setInterval(pollState, 4000);
-
-// Set default date on history picker
-const etNow = new Date(Date.now() - 4*3600*1000);
-document.getElementById("date-pick").value = etNow.toISOString().slice(0, 10);
+setInterval(pollState, 4000);
+document.getElementById("date-pick").value =
+  new Date(Date.now()-4*3600000).toISOString().slice(0,10);
 </script>
 </body>
 </html>

@@ -22,30 +22,63 @@ def _et_date() -> str:
 
 @app.get("/api/state")
 def api_state():
-    s = state.get_all()
+    s          = state.get_all()
+    ws_prices  = s.get("ws_prices", {})
     discovered = s.get("discovered_markets", {})
-    # Summarise discovered markets for dashboard
+
     market_summary = []
     for et, markets in discovered.items():
         for m in markets:
+            ticker  = m.get("ticker", "")
+            ws_data = ws_prices.get(ticker, {})
+
+            # Prefer live WS prices; fall back to stale REST cache
+            if ws_data:
+                yes_bid  = float(ws_data.get("yes_bid_dollars",  "0") or "0")
+                yes_ask  = float(ws_data.get("yes_ask_dollars",  "0") or "0")
+                no_ask_c = max(0, 100 - round(yes_bid * 100))
+                yes_ask_c = round(yes_ask * 100)
+                oi       = float(ws_data.get("open_interest_fp", "0") or "0")
+                volume   = float(ws_data.get("volume_fp",        "0") or "0")
+                live     = True
+            else:
+                no_ask_c  = round(float(m.get("no_ask_dollars")  or 0) * 100)
+                yes_ask_c = round(float(m.get("yes_ask_dollars") or 0) * 100)
+                oi        = float(m.get("open_interest_fp") or 0)
+                volume    = float(m.get("volume_fp") or 0)
+                live      = False
+
+            first_bid_ts = s.get("first_bids", {}).get(ticker)
+
             market_summary.append({
                 "event_ticker":  et,
-                "ticker":        m.get("ticker",""),
-                "bucket":        m.get("no_sub_title") or m.get("yes_sub_title",""),
-                "no_ask_cents":  round(float(m.get("no_ask_dollars") or 0) * 100),
-                "yes_ask_cents": round(float(m.get("yes_ask_dollars") or 0) * 100),
-                "open_interest": float(m.get("open_interest_fp") or 0),
-                "volume":        float(m.get("volume_fp") or 0),
-                "open_time":     m.get("open_time",""),
-                "created_time":  m.get("created_time",""),
+                "ticker":        ticker,
+                "bucket":        m.get("no_sub_title") or m.get("yes_sub_title", ""),
+                "no_ask_cents":  no_ask_c,
+                "yes_ask_cents": yes_ask_c,
+                "open_interest": oi,
+                "volume":        volume,
+                "open_time":     m.get("open_time", ""),
+                "created_time":  m.get("created_time", ""),
+                "ws_live":       live,
+                "first_bid_ts":  first_bid_ts,
             })
+
+    ws_status = {
+        "connected": s.get("ws_connected", False),
+        "tickers":   s.get("ws_tickers", 0),
+        "last_msg":  s.get("ws_last_msg_ts", 0),
+    }
+
     return jsonify({
-        "watch_phase":    s.get("watch_phase","IDLE"),
+        "watch_phase":    s.get("watch_phase", "IDLE"),
         "server_ts":      s.get("server_ts", 0),
         "markets":        market_summary,
-        "last_bid_count": len(s.get("last_bid_run",[])),
-        "errors":         s.get("errors",[]),
+        "last_bid_count": len(s.get("last_bid_run", [])),
+        "errors":         s.get("errors", []),
         "dry_run":        runtime_config.get("dry_run", True),
+        "ws":             ws_status,
+        "bids_fired_today": s.get("bids_fired_today", False),
     })
 
 
@@ -59,9 +92,8 @@ def api_bids():
 
 @app.get("/api/research")
 def api_research():
-    """Historical market creation + open time data."""
-    timing  = get_market_timing_history(days=60)
-    log     = get_session_log(limit=100)
+    timing = get_market_timing_history(days=60)
+    log    = get_session_log(limit=100)
     return jsonify({"timing": timing, "log": log})
 
 
@@ -93,13 +125,17 @@ def api_settings_post():
 
 @app.get("/api/manual-trigger")
 def api_manual_trigger():
-    """Manually fire the bid cycle right now (for testing)."""
+    """Manually fire the bid cycle using live WS state if available."""
     import asyncio, threading
     from speed_bidder import run_bids
+    ws_prices = state.get_ws_prices()
+
     def _run():
-        asyncio.run(run_bids())
+        asyncio.run(run_bids(ws_state=ws_prices if ws_prices else None))
+
     threading.Thread(target=_run, name="manual-bid", daemon=True).start()
-    return jsonify({"ok": True, "msg": "Bid cycle triggered"})
+    path = "WS" if ws_prices else "REST"
+    return jsonify({"ok": True, "msg": f"Bid cycle triggered ({path} path)"})
 
 
 @app.get("/api/refresh-markets")
@@ -107,10 +143,90 @@ def api_refresh_markets():
     """Manually re-discover today's markets."""
     import asyncio, threading
     from market_watcher import _discover_todays_markets
+
     def _run():
         asyncio.run(_discover_todays_markets())
+
     threading.Thread(target=_run, name="manual-discover", daemon=True).start()
     return jsonify({"ok": True, "msg": "Market discovery triggered"})
+
+
+@app.get("/api/backfill-research")
+def api_backfill_research():
+    """Pull up to 7 days of historical market data for all 32 series."""
+    import asyncio, threading
+    from market_watcher import run_research_backfill
+    results = {}
+
+    def _run():
+        results.update(asyncio.run(run_research_backfill(days=7)))
+
+    t = threading.Thread(target=_run, name="backfill", daemon=True)
+    t.start()
+    t.join(timeout=60)   # wait up to 60s synchronously so we can return results
+    return jsonify({"ok": True, **results})
+
+
+@app.get("/api/test-batch")
+def api_test_batch():
+    """
+    Dry-run connectivity test: verify Kalshi auth + time the full batch flow.
+    Does NOT place real orders. Uses dry_run=True always.
+    Returns: balance, timing for market fetch, batch chunking plan, WS status.
+    """
+    import asyncio, time as _time
+
+    async def _test():
+        from kalshi.speed_client import SpeedClient
+        t0 = _time.perf_counter()
+        result = {}
+
+        async with SpeedClient() as client:
+            # 1. Balance check (verifies auth works)
+            try:
+                bal = await client.get_balance()
+                result["balance_dollars"] = bal
+            except Exception as e:
+                result["balance_error"] = str(e)
+
+            # 2. Fetch today's discovered markets (or re-fetch)
+            discovered = state.get_discovered_markets()
+            if not discovered:
+                from market_watcher import _discover_todays_markets
+                discovered = await _discover_todays_markets()
+
+            all_markets = [
+                {"ticker": m.get("ticker",""), "no_ask_cents": 0, "open_interest": 0}
+                for mkts in discovered.values()
+                for m in mkts
+            ]
+            result["markets_found"] = len(all_markets)
+            result["fetch_ms"]      = round((_time.perf_counter() - t0) * 1000)
+
+            # 3. Dry-run the full batch path (no real orders)
+            batch_size = runtime_config.get("batch_size", 30)
+            batch_conc = runtime_config.get("batch_concurrency", 3)
+            n_chunks   = max(1, -(-len(all_markets) // batch_size))  # ceiling div
+            result["batch_plan"] = {
+                "total_markets":   len(all_markets),
+                "batch_size":      batch_size,
+                "batch_concurrency": batch_conc,
+                "chunks":          n_chunks,
+                "estimated_rounds": -(-n_chunks // batch_conc),
+            }
+
+            # 4. WS status
+            ws = state.get_ws_status()
+            result["ws"] = ws
+
+        result["total_ms"] = round((_time.perf_counter() - t0) * 1000)
+        return result
+
+    try:
+        data = asyncio.run(_test())
+        return jsonify({"ok": True, **data})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -126,6 +242,12 @@ def create_app():
     init_db()
     import scheduler
     scheduler.start()
+    # Auto-backfill research data on startup (non-blocking)
+    import threading, asyncio
+    from market_watcher import run_research_backfill
+    def _backfill():
+        asyncio.run(run_research_backfill(days=7))
+    threading.Thread(target=_backfill, name="startup-backfill", daemon=True).start()
     return app
 
 
