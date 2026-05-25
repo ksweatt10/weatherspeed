@@ -113,6 +113,12 @@ async def _discover_todays_markets() -> dict[str, list[dict]]:
                         mkt.get("created_time", ""), mkt.get("open_time", ""),
                     )
 
+            # Annotate each market dict with city/kind so downstream
+            # consumers (speed_bidder city_map, dashboard) can read them
+            # without a separate config lookup.
+            for mkt in markets:
+                mkt["city"] = city
+                mkt["kind"] = kind
             found[et] = markets
 
     state.set_discovered_markets(found)
