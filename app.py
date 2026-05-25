@@ -247,6 +247,129 @@ def api_backfill_research():
     return jsonify({"ok": True, **results})
 
 
+@app.get("/api/test-live-bids")
+def api_test_live_bids():
+    """
+    Live API smoke test — places real NO bids at 1¢ on N discovered buckets,
+    then immediately cancels every order.  1¢ NO = 99¢ YES implied, so fills
+    are essentially impossible.
+
+    Query params:
+      n=30    number of buckets to hit (default 30 = one batch chunk)
+      rounds  pass n=90 for 3 rounds to test inter-round spacing
+
+    Returns per-order result, batch timing, and cancel confirmations.
+    """
+    import asyncio, time as _t, uuid as _uuid
+
+    n = min(int(request.args.get("n", 30)), 200)
+
+    async def _run():
+        from kalshi.speed_client import SpeedClient
+
+        discovered = state.get_discovered_markets()
+        if not discovered:
+            return {"ok": False, "error": "no markets discovered — run Refresh Markets first"}
+
+        tickers = [
+            m.get("ticker", "")
+            for mkts in discovered.values()
+            for m in mkts
+            if m.get("ticker")
+        ][:n]
+
+        if not tickers:
+            return {"ok": False, "error": "no tickers available"}
+
+        # Build batch payload — 1¢ NO, GTC, unique client IDs
+        orders_payload = [
+            {
+                "ticker":          t,
+                "side":            "no",
+                "action":          "buy",
+                "count":           1,
+                "no_price":        1,       # 1¢ — essentially unfillable
+                "client_order_id": f"smoketest-{_uuid.uuid4().hex[:8]}",
+                "time_in_force":   "good_till_canceled",
+            }
+            for t in tickers
+        ]
+
+        # Split into chunks matching live batch_size setting
+        batch_size = runtime_config.get("batch_size", 30)
+        chunks     = [orders_payload[i:i+batch_size]
+                      for i in range(0, len(orders_payload), batch_size)]
+        n_chunks   = len(chunks)
+
+        placed_ids:  list[str]  = []
+        order_rows:  list[dict] = []
+        chunk_times: list[int]  = []
+        errors:      list[str]  = []
+        raw_resps:   list       = []
+
+        async with SpeedClient() as client:
+            # Fire chunks sequentially (mirrors real bid engine round logic)
+            t_total = _t.perf_counter()
+            for i, chunk in enumerate(chunks):
+                t0   = _t.perf_counter()
+                try:
+                    resp = await client._post("/portfolio/orders/batched",
+                                             {"orders": chunk})
+                    ms   = round((_t.perf_counter() - t0) * 1000)
+                    chunk_times.append(ms)
+                    raw_resps.append(resp)
+
+                    for item in resp.get("orders", []):
+                        err = item.get("error")
+                        ord_obj = item.get("order", {})
+                        oid     = ord_obj.get("order_id") or ord_obj.get("id")
+                        row = {
+                            "ticker":    ord_obj.get("ticker") or item.get("ticker", "?"),
+                            "order_id":  oid,
+                            "status":    ord_obj.get("status"),
+                            "error":     str(err) if err else None,
+                            "chunk":     i + 1,
+                            "chunk_ms":  ms,
+                        }
+                        order_rows.append(row)
+                        if oid:
+                            placed_ids.append(oid)
+
+                except Exception as e:
+                    ms = round((_t.perf_counter() - t0) * 1000)
+                    chunk_times.append(ms)
+                    errors.append(f"chunk {i+1}: {e}")
+
+            total_ms = round((_t.perf_counter() - t_total) * 1000)
+
+            # Cancel all placed orders immediately
+            cancels = await client.cancel_orders(placed_ids)
+
+        placed  = sum(1 for r in order_rows if r["order_id"] and not r["error"])
+        errored = sum(1 for r in order_rows if r["error"])
+        cancelled = sum(1 for c in cancels if c["ok"])
+
+        return {
+            "ok":           True,
+            "tickers_hit":  len(tickers),
+            "chunks":       n_chunks,
+            "chunk_ms":     chunk_times,
+            "total_ms":     total_ms,
+            "placed":       placed,
+            "errored":      errored,
+            "cancelled":    cancelled,
+            "errors":       errors,
+            "orders":       order_rows,
+            "cancel_detail": cancels,
+        }
+
+    try:
+        data = asyncio.run(_run())
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.get("/api/test-batch")
 def api_test_batch():
     """

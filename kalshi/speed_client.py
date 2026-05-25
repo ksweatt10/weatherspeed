@@ -106,6 +106,16 @@ class SpeedClient:
                 return await r.json()
         raise RuntimeError(f"_post {path} failed after {_retry} attempts")
 
+    async def _delete(self, path: str) -> dict:
+        full_path = f"{_PREFIX}{path}"
+        headers   = _auth_headers("DELETE", full_path)
+        async with self._session.delete(full_path, headers=headers) as r:
+            r.raise_for_status()
+            # 204 No Content on success — return empty dict
+            if r.content_length == 0 or r.status == 204:
+                return {}
+            return await r.json()
+
     # ── Market discovery ──────────────────────────────────────────────────────
 
     async def list_events(self, series_ticker: str,
@@ -163,6 +173,24 @@ class SpeedClient:
                 out[et] = []
             else:
                 out[et] = res
+        return out
+
+    # ── Order management ─────────────────────────────────────────────────────
+
+    async def cancel_order(self, order_id: str) -> dict:
+        """Cancel a single resting order by ID."""
+        return await self._delete(f"/portfolio/orders/{order_id}")
+
+    async def cancel_orders(self, order_ids: list[str]) -> list[dict]:
+        """Cancel multiple orders concurrently. Returns list of results."""
+        tasks = [self.cancel_order(oid) for oid in order_ids]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        out = []
+        for oid, r in zip(order_ids, results):
+            if isinstance(r, Exception):
+                out.append({"order_id": oid, "ok": False, "error": str(r)})
+            else:
+                out.append({"order_id": oid, "ok": True})
         return out
 
     # ── Trades ───────────────────────────────────────────────────────────────

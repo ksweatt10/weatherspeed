@@ -190,6 +190,7 @@ input:checked+.slider:before{transform:translateX(18px)}
       <button class="btn" onclick="triggerRefreshMarkets()">🔄 Refresh Markets</button>
       <button class="btn" onclick="triggerBackfill()">📥 Backfill Research</button>
       <button class="btn" onclick="triggerTestBatch()">🧪 Test Batch</button>
+      <button class="btn" onclick="triggerTestLiveBids()">🔴 Test Live Bids</button>
       <button class="btn primary" onclick="triggerManualBid()">⚡ Manual Bid Cycle</button>
     </div>
   </div>
@@ -791,7 +792,7 @@ async function triggerTestBatch() {
       `Markets found:     ${r.markets_found}`,
       `Market fetch:      ${r.fetch_ms}ms`,
       "",
-      "=== Batch Plan (at open with 192 potential orders) ===",
+      "=== Batch Plan (at open with ~192 orders) ===",
       `Total markets:     ${r.batch_plan?.total_markets}`,
       `Batch size:        ${r.batch_plan?.batch_size} orders/chunk`,
       `Concurrency:       ${r.batch_plan?.batch_concurrency} simultaneous`,
@@ -807,6 +808,67 @@ async function triggerTestBatch() {
     ].join("\n");
   } catch(e) {
     panel.textContent = "TEST FAILED: "+e.message;
+  }
+}
+
+async function triggerTestLiveBids() {
+  const panel = document.getElementById("test-result");
+  panel.style.display = "block";
+  panel.textContent = "Firing live test bids at 1¢ (won't fill) then auto-cancelling…";
+  try {
+    const r = await api("/api/test-live-bids?n=30");
+    if (!r.ok) { panel.textContent = "FAILED: " + r.error; return; }
+
+    const placed  = r.orders?.filter(o => o.order_id && !o.error) || [];
+    const erred   = r.orders?.filter(o => o.error) || [];
+    const cancelled = r.cancel_detail?.filter(c => c.ok) || [];
+    const cancelFailed = r.cancel_detail?.filter(c => !c.ok) || [];
+
+    let lines = [
+      "=== Live Bid Smoke Test (1¢ NO — auto-cancelled) ===",
+      `Tickers hit:       ${r.tickers_hit}`,
+      `Chunks sent:       ${r.chunks}`,
+      `Chunk timing:      ${(r.chunk_ms||[]).map((ms,i)=>`chunk${i+1}=${ms}ms`).join(", ")}`,
+      `Total time:        ${r.total_ms}ms`,
+      "",
+      `Orders placed:     ${r.placed}`,
+      `Order errors:      ${r.errored}`,
+      `Cancelled:         ${r.cancelled} / ${placed.length}`,
+      `Cancel failures:   ${cancelFailed.length}`,
+    ];
+
+    if (r.errors?.length) {
+      lines.push("", "=== Batch Errors ===");
+      r.errors.forEach(e => lines.push("  " + e));
+    }
+
+    if (erred.length) {
+      lines.push("", "=== Order-Level Errors (first 5) ===");
+      erred.slice(0,5).forEach(o => lines.push(`  ${o.ticker}: ${o.error}`));
+    }
+
+    lines.push("", "=== Sample Orders (first 10) ===");
+    placed.slice(0,10).forEach(o => {
+      lines.push(`  ${(o.ticker||"").padEnd(35)} id=${o.order_id?.slice(0,8)}… ${o.chunk_ms}ms`);
+    });
+
+    if (cancelFailed.length) {
+      lines.push("", "⚠️  Some orders NOT cancelled — check Kalshi portfolio!");
+      cancelFailed.forEach(c => lines.push("  " + c.order_id));
+    } else {
+      lines.push("", "✅ All orders cancelled — no open positions.");
+    }
+
+    panel.textContent = lines.join("\n");
+    toast(
+      r.errored===0 && cancelFailed.length===0
+        ? `✅ ${r.placed} orders placed & cancelled in ${r.total_ms}ms`
+        : `⚠️ ${r.errored} errors, ${cancelFailed.length} cancel failures`,
+      r.errored===0 ? "ok" : "err"
+    );
+  } catch(e) {
+    panel.textContent = "TEST FAILED: " + e.message;
+    toast("Live bid test failed: "+e.message, "err");
   }
 }
 
