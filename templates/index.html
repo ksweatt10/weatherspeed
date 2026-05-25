@@ -243,7 +243,7 @@ input:checked+.slider:before{transform:translateX(18px)}
       <thead><tr>
         <th>Time (UTC)</th><th>Ticker</th><th>City</th><th>Bucket</th>
         <th>NO Price</th><th>Qty</th><th>OI at Bid</th>
-        <th>First?</th><th>ms After Open</th><th>Status</th><th>Dry?</th>
+        <th>First?</th><th>ms After Open</th><th>Engine ms</th><th>Status</th><th>Dry?</th>
       </tr></thead>
       <tbody id="bids-tbody"></tbody>
     </table>
@@ -501,7 +501,8 @@ async function loadBids() {
         <td>${b.contracts||1}</td>
         <td>${b.open_interest||0}</td>
         <td>${fp}</td>
-        <td>${b.ms_after_open!=null ? b.ms_after_open+"ms" : "—"}</td>
+        <td>${b.ms_after_open!=null ? b.ms_after_open.toLocaleString()+"ms" : "—"}</td>
+        <td>${b.bid_engine_ms!=null ? b.bid_engine_ms+"ms" : "—"}</td>
         <td>${st}</td>
         <td>${dr}</td>
       </tr>`;

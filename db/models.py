@@ -71,7 +71,8 @@ def init_db() -> None:
             order_id        TEXT,
             status          TEXT,
             placed_at       TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
-            ms_after_open   INTEGER
+            ms_after_open   INTEGER,
+            bid_engine_ms   INTEGER
         );
 
         CREATE TABLE IF NOT EXISTS session_log (
@@ -85,6 +86,7 @@ def init_db() -> None:
         # Migration: add columns if upgrading from older schema
         _safe_add_column(con, "market_timing",  "first_bid_time",          "TEXT")
         _safe_add_column(con, "market_buckets", "first_bid_time",          "TEXT")
+        _safe_add_column(con, "bid_log",        "bid_engine_ms",           "INTEGER")
         _safe_add_column(con, "market_buckets", "first_trade_et",          "TEXT")
         _safe_add_column(con, "market_buckets", "first_trade_contracts",   "REAL")
         _safe_add_column(con, "market_buckets", "first_trade_yes_price",   "REAL")
@@ -308,18 +310,20 @@ def insert_bid(date: str, event_ticker: str, ticker: str, city: str,
                bucket_label: str, contracts: int, no_price_cents: int,
                open_interest: float, was_first: bool, dry_run: bool,
                order_id: str | None, status: str,
-               ms_after_open: int | None) -> int:
+               ms_after_open: int | None,
+               bid_engine_ms: int | None = None) -> int:
     with _conn() as con:
         cur = con.execute("""
             INSERT INTO bid_log
                 (date, event_ticker, ticker, city, bucket_label,
                  contracts, no_price_cents, open_interest,
-                 was_first, dry_run, order_id, status, ms_after_open)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 was_first, dry_run, order_id, status, ms_after_open,
+                 bid_engine_ms)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (date, event_ticker, ticker, city, bucket_label,
               contracts, no_price_cents, open_interest,
               1 if was_first else 0, 1 if dry_run else 0,
-              order_id, status, ms_after_open))
+              order_id, status, ms_after_open, bid_engine_ms))
         return cur.lastrowid
 
 

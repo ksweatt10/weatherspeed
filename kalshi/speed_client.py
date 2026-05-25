@@ -252,7 +252,8 @@ class SpeedClient:
                              dry_run: bool = True,
                              batch_size: int = 30,
                              batch_concurrency: int = 3,
-                             inter_round_ms: int = 0) -> list[dict]:
+                             inter_round_ms: int = 0,
+                             t_open: float | None = None) -> list[dict]:
         """
         Place NO bids on all qualifying markets using chunked batch POSTs.
 
@@ -272,6 +273,10 @@ class SpeedClient:
         """
         import uuid
         t0 = time.perf_counter()
+        # Wall-clock reference for ms_after_open.  Caller passes the scheduled
+        # open epoch (14:00:00 UTC) so both WS and fallback paths share the
+        # same reference.  Defaults to now() if not supplied (manual trigger).
+        _t_open_wall: float = t_open if t_open is not None else time.time()
 
         results:  list[dict] = []
         to_place: list[dict] = []   # result dicts that passed qualification
@@ -294,7 +299,8 @@ class SpeedClient:
                 "order_id":      None,
                 "error":         None,
                 "was_first":     oi == 0,
-                "ms_elapsed":    None,
+                "ms_elapsed":    None,   # wall ms from 14:00:00 UTC → order confirmed
+                "engine_ms":     None,   # how long batch_no_bids ran internally
             }
             results.append(r)
 
@@ -313,9 +319,11 @@ class SpeedClient:
 
         # Stamp dry-run timing and return early
         if dry_run:
-            ms = round((time.perf_counter() - t0) * 1000)
+            engine_ms = round((time.perf_counter() - t0) * 1000)
+            ms_after  = round((time.time() - _t_open_wall) * 1000)
             for r in to_place:
-                r["ms_elapsed"] = ms
+                r["ms_elapsed"] = ms_after   # wall ms from open → qualification done
+                r["engine_ms"]  = engine_ms  # how long the qual loop took
             return results
 
         if not to_place:
@@ -360,10 +368,13 @@ class SpeedClient:
             t1   = time.perf_counter()
             resp = await self._post("/portfolio/orders/batched",
                                     {"orders": chunk})
-            ms   = round((time.perf_counter() - t1) * 1000)
+            t_wall_resp = time.time()          # wall clock when Kalshi responded
+            ms_engine   = round((time.perf_counter() - t1) * 1000)  # HTTP RTT
+            ms_from_open = round((t_wall_resp - _t_open_wall) * 1000)
             print(f"[speed] chunk {chunk_idx+1}/{n_chunks} "
-                  f"({len(chunk)} orders) → {ms}ms")
-            return resp, ms
+                  f"({len(chunk)} orders) → {ms_engine}ms rtt / "
+                  f"{ms_from_open}ms after open")
+            return resp, ms_engine, ms_from_open
 
         responses: list = []
         for round_start in range(0, n_chunks, batch_concurrency):
@@ -380,39 +391,43 @@ class SpeedClient:
             if inter_round_ms > 0 and round_start + batch_concurrency < n_chunks:
                 await asyncio.sleep(inter_round_ms / 1000)
 
-        ms_total = round((time.perf_counter() - t0) * 1000)
+        ms_total      = round((time.perf_counter() - t0) * 1000)
+        ms_total_open = round((time.time() - _t_open_wall) * 1000)
 
         # ── Parse all responses back to result dicts ──────────────────────────
         for resp_or_exc in responses:
             if isinstance(resp_or_exc, Exception):
                 # Whole chunk failed — mark its orders as errored
-                # We can't know which chunk failed, so mark all unresolved
                 print(f"[speed] chunk error: {resp_or_exc}")
                 for r in to_place:
                     if r["ms_elapsed"] is None:
                         r["error"]      = str(resp_or_exc)
-                        r["ms_elapsed"] = ms_total
+                        r["ms_elapsed"] = ms_total_open
+                        r["engine_ms"]  = ms_total
                 continue
 
-            resp, ms_chunk = resp_or_exc
+            resp, ms_engine, ms_after_open = resp_or_exc
             for item in resp.get("orders", []):
                 r = cid_map.get(item.get("client_order_id", ""))
                 if not r:
                     continue
                 if item.get("error"):
                     r["error"]      = str(item["error"])
-                    r["ms_elapsed"] = ms_chunk
+                    r["ms_elapsed"] = ms_after_open
+                    r["engine_ms"]  = ms_engine
                 else:
-                    ord_obj         = item.get("order", {})
-                    r["placed"]     = True
-                    r["order_id"]   = ord_obj.get("order_id") or ord_obj.get("id")
-                    r["ms_elapsed"] = ms_chunk
+                    ord_obj          = item.get("order", {})
+                    r["placed"]      = True
+                    r["order_id"]    = ord_obj.get("order_id") or ord_obj.get("id")
+                    r["ms_elapsed"]  = ms_after_open  # wall ms from open → confirmed
+                    r["engine_ms"]   = ms_engine      # HTTP RTT for this chunk
 
         # Catch any orders that got no response at all
         for r in to_place:
             if r["ms_elapsed"] is None:
                 r["error"]      = "no response"
-                r["ms_elapsed"] = ms_total
+                r["ms_elapsed"] = ms_total_open
+                r["engine_ms"]  = ms_total
 
         placed = sum(1 for r in to_place if r["placed"])
         print(f"[speed] batch complete — {placed}/{len(to_place)} placed "

@@ -45,6 +45,15 @@ async def run_bids(ws_state: dict | None = None) -> None:
               Pass None to fall back to REST market fetch.
     """
     today     = _today_et()
+
+    # Wall-clock epoch for ms_after_open.  Both WS and timer-fallback paths
+    # compute the same reference: the scheduled open (14:00:00 UTC today).
+    _oh = runtime_config.get("open_time_utc_hour",   14)
+    _om = runtime_config.get("open_time_utc_minute",  0)
+    _d  = datetime.now(timezone.utc).date()
+    t_open = datetime(_d.year, _d.month, _d.day, _oh, _om, 0,
+                      tzinfo=timezone.utc).timestamp()
+
     dry_run         = runtime_config.get("dry_run",               True)
     dollars_per_bkt = runtime_config.get("dollars_per_bucket",    0.0)
     contracts       = runtime_config.get("contracts_per_market",  1)
@@ -181,6 +190,7 @@ async def run_bids(ws_state: dict | None = None) -> None:
             batch_size        = batch_size,
             batch_concurrency = batch_conc,
             inter_round_ms    = inter_round_ms,
+            t_open            = t_open,
         )
         ms_bid = round((time.perf_counter() - t_bid) * 1000)
 
@@ -217,6 +227,7 @@ async def run_bids(ws_state: dict | None = None) -> None:
                 status         = ("placed" if r.get("placed")
                                   else "skip:" + (r.get("error") or "")),
                 ms_after_open  = r.get("ms_elapsed"),
+                bid_engine_ms  = r.get("engine_ms"),
             )
 
         summary = (
