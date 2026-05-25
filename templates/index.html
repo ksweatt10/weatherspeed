@@ -710,8 +710,8 @@ const SMETA = {
   dollars_per_bucket:  {l:"$ Per Bucket",       d:"Target dollars at risk per bucket — engine calculates contracts as round($ ÷ NO price). E.g. $5 at 52¢ = 10 contracts. Set to 0 to use Contracts/Market instead.", t:"float", min:0, max:10000, step:0.5},
   contracts_per_market:{l:"Contracts / Market", d:"Fixed contracts per bucket — used only when $ Per Bucket = 0. Each NO contract pays $1 if NO wins; you pay the NO ask price upfront (e.g. 52¢ × 5 = $2.60 at risk).", t:"int", min:1, max:500},
   // ── Price filter ──────────────────────────────────────────────────────────
-  max_no_price_cents:  {l:"Max NO Price (¢)",   d:"Skip buckets where NO ask is above this. 70¢ NO = 30¢ YES implied probability. Higher = more risk, higher payout.", t:"int", min:1, max:99},
-  min_no_price_cents:  {l:"Min NO Price (¢)",   d:"Skip buckets where NO ask is below this. Very cheap NO = market is very confident about outcome.", t:"int", min:1, max:99},
+  max_no_price_cents:  {l:"Max Entry Price (¢)", d:"Skip if the bucket is ALREADY priced above this before your bid. At 70¢ you risk 70¢ to win 30¢ — above that the reward isn't worth it. This is the market's price, not yours.", t:"int", min:1, max:99},
+  min_no_price_cents:  {l:"Min Entry Price (¢)", d:"Skip if the bucket is ALREADY priced below this. Set to 1 for no lower bound (enter anything up to max). Low NO price = market strongly disfavors NO winning.", t:"int", min:1, max:99},
   // ── Batch engine ──────────────────────────────────────────────────────────
   batch_size:          {l:"Batch Size",         d:"Orders per batch POST chunk (Kalshi limit ≈30). 192 orders ÷ 30 = 7 chunks.", t:"int", min:1, max:30},
   batch_concurrency:   {l:"Batch Concurrency",  d:"Simultaneous chunk POSTs per round. 3 chunks × ~47ms RTT ≈ 141ms for all orders.", t:"int", min:1, max:5},
@@ -767,9 +767,11 @@ function updateExposureCalc(s) {
 
   const dollars    = parseFloat(s.dollars_per_bucket) || 0;
   const contracts  = parseInt(s.contracts_per_market) || 1;
-  const minC       = parseInt(s.min_no_price_cents)   || 50;
+  const minC       = parseInt(s.min_no_price_cents)   || 1;
   const maxC       = parseInt(s.max_no_price_cents)   || 70;
-  const avgC       = (minC + maxC) / 2;             // midpoint of qualifying range
+  // Use a realistic avg (~55¢) rather than midpoint of 1–70 which would be 35¢
+  // Most weather buckets at open price in the 45–65¢ range
+  const avgC       = minC <= 10 ? Math.round(maxC * 0.75) : Math.round((minC + maxC) / 2);
   const buckets    = 192;                           // typical qualifying bucket count at open
 
   let rows = [];
