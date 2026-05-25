@@ -185,6 +185,28 @@ def api_refresh_markets():
     return jsonify({"ok": True, "msg": "Market discovery triggered"})
 
 
+@app.get("/api/pull-first-trades-backfill")
+def api_pull_first_trades_backfill():
+    """
+    DB-driven first-trade backfill: hits every bucket in market_buckets whose
+    open_time is within the last N days and first_trade_contracts is NULL.
+    Catches days where the discovery window has already closed (e.g. today after
+    14:00 UTC). Pass ?days=N to control the lookback (default 3).
+    """
+    import asyncio, threading
+    from market_watcher import pull_first_trades_db_backfill
+    days    = int(request.args.get("days", 3))
+    results = {}
+
+    def _run():
+        results.update(asyncio.run(pull_first_trades_db_backfill(days_back=days)))
+
+    t = threading.Thread(target=_run, name="ft-backfill", daemon=True)
+    t.start()
+    t.join(timeout=180)
+    return jsonify({"ok": True, **results})
+
+
 @app.get("/api/pull-first-trades")
 def api_pull_first_trades():
     """

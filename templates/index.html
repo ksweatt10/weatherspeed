@@ -260,6 +260,7 @@ input:checked+.slider:before{transform:translateX(18px)}
     <div class="acts">
       <button class="btn" onclick="triggerBackfill()">📥 Backfill 7 Days</button>
       <button class="btn" onclick="triggerPullFirstTrades()">⏱ Pull First Trades</button>
+      <button class="btn" onclick="triggerFillMissingTrades()">🔍 Fill Missing Trades</button>
       <button class="btn" onclick="loadResearch()">🔄 Refresh</button>
     </div>
   </div>
@@ -750,6 +751,18 @@ async function triggerBackfill() {
     toast(`Backfill done: ${r.inserted||0} events, ${r.skipped||0} skipped`,"ok");
     if (document.querySelector("nav button.active").dataset.tab==="research") loadResearch();
   } catch(e) { toast("Backfill failed: "+e.message,"err"); }
+}
+
+async function triggerFillMissingTrades() {
+  toast("DB backfill started — scanning last 3 days for missing trade data…","info");
+  try {
+    const r = await api("/api/pull-first-trades-backfill");
+    toast(
+      `Fill done: ${r.pulled||0} pulled, ${r.no_trades||0} no trades`,
+      r.errors&&r.errors.length ? "info" : "ok"
+    );
+    if (document.querySelector("nav button.active").dataset.tab==="research") loadResearch();
+  } catch(e) { toast("Fill failed: "+e.message,"err"); }
 }
 
 async function triggerPullFirstTrades() {

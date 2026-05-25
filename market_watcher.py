@@ -398,6 +398,78 @@ async def pull_first_trades_for_open_markets(overwrite: bool = False) -> dict:
             "errors": errors, "tickers": len(tickers)}
 
 
+async def pull_first_trades_db_backfill(days_back: int = 3) -> dict:
+    """
+    DB-driven first-trade backfill.
+
+    Unlike pull_first_trades_for_open_markets() (which only covers in-memory
+    discovered markets), this queries market_buckets directly for every bucket
+    whose open_time falls within the last `days_back` days AND whose
+    first_trade_contracts is still NULL.  Catches buckets from days where the
+    discovery window has already closed (e.g. today's markets after 14:00 UTC).
+
+    Concurrency capped at 5.  Returns {pulled, no_trades, skipped, errors, tickers}.
+    """
+    from db.models import upsert_first_trade_data, _conn as _db_conn
+    from datetime import datetime, timezone, timedelta
+
+    today_str  = _today_et_str()
+    cutoff_utc = (datetime.now(timezone.utc) - timedelta(days=days_back)).isoformat()
+
+    with _db_conn() as con:
+        rows = con.execute("""
+            SELECT ticker FROM market_buckets
+            WHERE first_trade_contracts IS NULL
+              AND open_time >= ?
+        """, (cutoff_utc,)).fetchall()
+
+    tickers = [r[0] for r in rows if r[0]]
+    if not tickers:
+        return {"pulled": 0, "no_trades": 0, "skipped": 0,
+                "errors": [], "tickers": 0}
+
+    pulled    = 0
+    no_trades = 0
+    errors: list[str] = []
+    _sem = asyncio.Semaphore(5)
+
+    async with SpeedClient() as client:
+        async def _fetch_one(ticker: str):
+            async with _sem:
+                try:
+                    trade = await client.get_first_trade_for_ticker(ticker)
+                    return ticker, trade, None
+                except Exception as e:
+                    return ticker, None, str(e)
+
+        results = await asyncio.gather(*[_fetch_one(t) for t in tickers])
+
+    for ticker, trade, err in results:
+        if err:
+            errors.append(f"{ticker}: {err}")
+        elif trade is None:
+            no_trades += 1
+        else:
+            utc_iso    = trade.get("created_time", "")
+            if not utc_iso:
+                no_trades += 1
+                continue
+            contracts  = float(trade.get("count_fp",          0) or 0)
+            yes_price  = float(trade.get("yes_price_dollars", 0) or 0)
+            no_price   = float(trade.get("no_price_dollars",  0) or 0)
+            taker_side = trade.get("taker_side", "")
+            upsert_first_trade_data(ticker, utc_iso, contracts,
+                                    yes_price, no_price, taker_side)
+            pulled += 1
+
+    summary = (f"db backfill: {pulled} pulled, {no_trades} no trades, "
+               f"{len(errors)} errors — {days_back}d window")
+    print(f"[watcher] {summary}")
+    log_event(today_str, "FIRST_TRADES_BACKFILL", summary)
+    return {"pulled": pulled, "no_trades": no_trades, "skipped": 0,
+            "errors": errors, "tickers": len(tickers)}
+
+
 def run_open_trigger() -> None:
     """
     FALLBACK ONLY — fires at 14:00:05 UTC if WS hasn't already triggered.
