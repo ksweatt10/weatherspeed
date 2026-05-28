@@ -162,17 +162,15 @@ def api_settings_post():
 
 @app.get("/api/manual-trigger")
 def api_manual_trigger():
-    """Manually fire the bid cycle using live WS state if available."""
+    """Manually fire the bid cycle."""
     import asyncio, threading
     from speed_bidder import run_bids
-    ws_prices = state.get_ws_prices()
 
     def _run():
-        asyncio.run(run_bids(ws_state=ws_prices if ws_prices else None))
+        asyncio.run(run_bids())
 
     threading.Thread(target=_run, name="manual-bid", daemon=True).start()
-    path = "WS" if ws_prices else "REST"
-    return jsonify({"ok": True, "msg": f"Bid cycle triggered ({path} path)"})
+    return jsonify({"ok": True, "msg": "Bid cycle triggered"})
 
 
 @app.get("/api/refresh-markets")
@@ -213,24 +211,34 @@ def api_pull_first_trades_backfill():
 @app.get("/api/pull-first-trades")
 def api_pull_first_trades():
     """
-    For all currently-discovered open-market buckets, paginate the Kalshi
-    trades API to find each bucket's oldest trade and store the timestamp
-    in market_buckets.first_bid_time.
+    Paginate Kalshi trades API to find each bucket's oldest trade.
+
+    Uses in-memory discovered markets if available (faster, covers today's
+    open buckets).  Falls back to DB-driven backfill (last 7 days) when
+    no markets are in memory — handles server restarts and post-close use.
 
     Pass ?overwrite=1 to re-fetch buckets that already have a value.
-    Blocks for up to 120s synchronously so the response includes results.
+    Blocks up to 180s synchronously so the response includes results.
     """
     import asyncio, threading
-    from market_watcher import pull_first_trades_for_open_markets
+    from market_watcher import pull_first_trades_for_open_markets, \
+                              pull_first_trades_db_backfill
     overwrite = request.args.get("overwrite", "0") == "1"
     results = {}
 
     def _run():
-        results.update(asyncio.run(pull_first_trades_for_open_markets(overwrite=overwrite)))
+        if state.get_discovered_markets():
+            results.update(
+                asyncio.run(pull_first_trades_for_open_markets(overwrite=overwrite)))
+        else:
+            # No in-memory markets (server restart / outside discovery window)
+            # Use DB-driven backfill covering the last 7 days instead
+            results.update(
+                asyncio.run(pull_first_trades_db_backfill(days_back=7)))
 
     t = threading.Thread(target=_run, name="first-trades", daemon=True)
     t.start()
-    t.join(timeout=120)
+    t.join(timeout=180)
     return jsonify({"ok": True, **results})
 
 
