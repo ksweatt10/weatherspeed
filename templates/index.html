@@ -244,7 +244,8 @@ input:checked+.slider:before{transform:translateX(18px)}
   <div class="tw">
     <table>
       <thead><tr>
-        <th>City</th><th>Bucket</th><th>Contracts</th>
+        <th>City</th><th>Ticker</th><th>Bucket</th><th>Qty</th>
+        <th>OI at Bid</th><th>First?</th><th>ms After Open</th><th>Engine ms</th><th>Dry?</th>
         <th>Order</th><th>Filled</th>
         <th>Result</th><th>Settlement</th><th>Settled At</th><th>P&amp;L</th>
       </tr></thead>
@@ -575,10 +576,22 @@ async function loadBids() {
         pnlCell = `<strong style="color:${col}">${b.pnl_cents >= 0 ? "+" : "-"}$${dollars}</strong>`;
       }
 
+      const fp   = b.was_first ? '<span class="pill green">✓</span>' : '<span style="color:var(--muted)">—</span>';
+      const dr   = b.dry_run ? '<span class="pill yellow">dry</span>' : '<span class="pill blue">live</span>';
+      const msAO = b.ms_after_open != null ? b.ms_after_open.toLocaleString() + "ms" : "—";
+      const engMs = b.bid_engine_ms != null ? b.bid_engine_ms + "ms" : "—";
+      const oi   = b.open_interest != null ? b.open_interest : "—";
+
       return `<tr>
-        <td>${b.city||b.ticker||"—"}</td>
+        <td>${b.city||"—"}</td>
+        <td class="mono" style="font-size:10px">${b.ticker||"—"}</td>
         <td style="font-size:11px">${b.bucket_label||"—"}</td>
         <td>${b.contracts||"—"}</td>
+        <td>${oi}</td>
+        <td>${fp}</td>
+        <td style="font-size:11px">${msAO}</td>
+        <td style="font-size:11px">${engMs}</td>
+        <td>${dr}</td>
         <td>${orderPill}</td>
         <td>${fillStr}</td>
         <td>${resPill}</td>
