@@ -469,6 +469,32 @@ def get_open_bid_order_ids() -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def get_resting_order_ids() -> list[str]:
+    """Return all order_ids currently marked as resting in bid_log."""
+    with _conn() as con:
+        rows = con.execute("""
+            SELECT DISTINCT order_id FROM bid_log
+            WHERE order_status = 'resting'
+              AND order_id IS NOT NULL
+              AND order_id != 'DRY_RUN'
+        """).fetchall()
+    return [r[0] for r in rows if r[0]]
+
+
+def mark_orders_canceled(order_ids: list[str]) -> int:
+    """Mark a list of order_ids as canceled in bid_log."""
+    if not order_ids:
+        return 0
+    with _conn() as con:
+        placeholders = ",".join("?" * len(order_ids))
+        con.execute(
+            f"UPDATE bid_log SET order_status='canceled', synced_at=? "
+            f"WHERE order_id IN ({placeholders})",
+            [datetime.now(timezone.utc).isoformat()] + order_ids,
+        )
+    return len(order_ids)
+
+
 def get_bid_history(days: int = 14) -> list[dict]:
     with _conn() as con:
         rows = con.execute("""

@@ -196,6 +196,34 @@ class SpeedClient:
 
         return list(await asyncio.gather(*[_cancel_one(oid) for oid in order_ids]))
 
+    async def individual_cancel_orders(self, order_ids: list[str],
+                                        inter_order_ms: int = 20) -> list[dict]:
+        """
+        Cancel orders one at a time with a fixed delay between each DELETE.
+        Mirrors individual_yes_bids() structure for apples-to-apples timing comparison.
+        Returns per-order timing so caller can measure actual DELETE throughput.
+        """
+        t0 = time.perf_counter()
+        results: list[dict] = []
+
+        for oid in order_ids:
+            r = {"order_id": oid, "ok": False, "error": None, "ms_elapsed": None}
+            results.append(r)
+            try:
+                await self.cancel_order(oid)
+                r["ok"]         = True
+                r["ms_elapsed"] = round((time.perf_counter() - t0) * 1000)
+            except Exception as exc:
+                r["error"]      = str(exc)
+                r["ms_elapsed"] = round((time.perf_counter() - t0) * 1000)
+            if inter_order_ms > 0:
+                await asyncio.sleep(inter_order_ms / 1000)
+
+        ms_total = round((time.perf_counter() - t0) * 1000)
+        ok = sum(1 for r in results if r["ok"])
+        print(f"[speed] cancel complete — {ok}/{len(results)} cancelled in {ms_total}ms")
+        return results
+
     # ── Trades ───────────────────────────────────────────────────────────────
 
     async def get_first_trade_for_ticker(self, ticker: str) -> dict | None:

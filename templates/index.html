@@ -237,6 +237,8 @@ input:checked+.slider:before{transform:translateX(18px)}
       <input type="date" id="date-pick" style="background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 8px;font-size:12px"/>
       <button class="btn" onclick="loadBids()">Go</button>
       <button class="btn" onclick="triggerOrderSync()" style="margin-left:8px">🔄 Sync Orders</button>
+      <button class="btn" id="cancel-btn" onclick="cancelAllResting()" style="margin-left:8px;background:var(--red);color:#fff">✕ Cancel Resting</button>
+      <span id="cancel-result" style="margin-left:10px;font-size:12px;color:var(--muted)"></span>
     </div>
   </div>
   <!-- Daily summary bar -->
@@ -611,6 +613,32 @@ async function triggerOrderSync() {
     toast("Order sync triggered","ok");
     setTimeout(loadBids, 4000);
   } catch(e) { toast("Sync failed: "+e.message,"err"); }
+}
+
+async function cancelAllResting() {
+  const btn = document.getElementById("cancel-btn");
+  const res = document.getElementById("cancel-result");
+  if (!confirm("Cancel all resting orders on Kalshi? This cannot be undone.")) return;
+  btn.disabled = true;
+  btn.textContent = "Cancelling…";
+  res.textContent = "";
+  try {
+    const d = await api("/api/cancel-resting", {method:"POST"});
+    const latency = d.implied_latency_ms;
+    res.textContent =
+      `✓ ${d.cancelled} cancelled in ${d.total_ms}ms — ` +
+      `${d.per_order_ms}ms/order (${d.inter_order_ms}ms delay + ${latency}ms latency)`;
+    res.style.color = "var(--green)";
+    toast(`Cancelled ${d.cancelled} orders in ${d.total_ms}ms`, "ok");
+    setTimeout(loadBids, 1000);
+  } catch(e) {
+    res.textContent = "Error: " + e.message;
+    res.style.color = "var(--red)";
+    toast("Cancel failed: "+e.message,"err");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "✕ Cancel Resting";
+  }
 }
 
 // ── Research ──────────────────────────────────────────────────────────────────

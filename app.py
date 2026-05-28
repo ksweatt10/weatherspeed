@@ -103,6 +103,51 @@ def api_sync_orders():
     return jsonify({"ok": True, "msg": "Order sync triggered"})
 
 
+@app.post("/api/cancel-resting")
+def api_cancel_resting():
+    """
+    Cancel all resting orders one at a time using inter_order_ms delay.
+    Timing test — mirrors individual_yes_bids() for apples-to-apples comparison.
+    Updates DB to 'canceled' for each successfully cancelled order.
+    """
+    import asyncio
+    from db.models import get_resting_order_ids, mark_orders_canceled
+    from kalshi.speed_client import SpeedClient
+
+    order_ids = get_resting_order_ids()
+    if not order_ids:
+        return jsonify({"error": "no resting orders found"}), 404
+
+    inter_ms = runtime_config.get("inter_order_ms", 20)
+
+    async def _run():
+        async with SpeedClient() as client:
+            return await client.individual_cancel_orders(
+                order_ids, inter_order_ms=inter_ms)
+
+    results   = asyncio.run(_run())
+    ok_ids    = [r["order_id"] for r in results if r["ok"]]
+    mark_orders_canceled(ok_ids)
+
+    ok        = len(ok_ids)
+    failed    = len(results) - ok
+    ms_vals   = [r["ms_elapsed"] for r in results if r["ms_elapsed"] is not None]
+    total_ms  = max(ms_vals) if ms_vals else 0
+    per_order = round(total_ms / len(results), 1) if results else 0
+
+    print(f"[cancel] {ok}/{len(results)} cancelled in {total_ms}ms "
+          f"({per_order}ms/order, {inter_ms}ms delay)")
+
+    return jsonify({
+        "cancelled":          ok,
+        "failed":             failed,
+        "total_ms":           total_ms,
+        "per_order_ms":       per_order,
+        "inter_order_ms":     inter_ms,
+        "implied_latency_ms": round(per_order - inter_ms, 1),
+    })
+
+
 @app.get("/api/research")
 def api_research():
     timing       = get_market_timing_history(days=60)
