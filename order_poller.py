@@ -39,12 +39,27 @@ def _is_weather(ticker: str) -> bool:
     return any(ticker.startswith(p) for p in _WEATHER_PREFIXES)
 
 
-async def _sync_orders(client: SpeedClient) -> tuple[int, int]:
+async def _fetch_queue_position(client: SpeedClient, order_id: str,
+                                sem: asyncio.Semaphore) -> float | None:
+    """Fetch queue_position_fp for a single resting order."""
+    async with sem:
+        try:
+            data = await client._get(f"/portfolio/orders/{order_id}/queue_position")
+            val  = data.get("queue_position_fp")
+            return float(val) if val is not None else None
+        except Exception:
+            return None
+
+
+async def _sync_orders(client: SpeedClient) -> int:
     """
     Pull all weather orders (resting + filled) from Kalshi.
-    Upsert each into bid_log. Returns (upserted, already_settled).
+    For resting orders, also fetches queue_position_fp concurrently.
+    Upserts each into bid_log. Returns count upserted.
     """
-    upserted = 0
+    resting_orders: list[dict] = []
+    filled_orders:  list[dict] = []
+
     for status_filter in ("resting", "filled"):
         cursor = ""
         while True:
@@ -55,12 +70,30 @@ async def _sync_orders(client: SpeedClient) -> tuple[int, int]:
             orders = data.get("orders", [])
             for o in orders:
                 if _is_weather(o.get("ticker", "")):
-                    upsert_bid_from_order(o)
-                    upserted += 1
+                    if status_filter == "resting":
+                        resting_orders.append(o)
+                    else:
+                        filled_orders.append(o)
             cursor = data.get("cursor", "")
             if not cursor or not orders:
                 break
-    return upserted
+
+    # Fetch queue positions for all resting orders concurrently (max 10 in flight)
+    if resting_orders:
+        sem = asyncio.Semaphore(10)
+        queue_tasks = [
+            _fetch_queue_position(client, o["order_id"], sem)
+            for o in resting_orders
+        ]
+        queue_positions = await asyncio.gather(*queue_tasks)
+        for o, qp in zip(resting_orders, queue_positions):
+            o["queue_position_fp"] = qp
+
+    # Upsert all orders
+    for o in resting_orders + filled_orders:
+        upsert_bid_from_order(o)
+
+    return len(resting_orders) + len(filled_orders)
 
 
 async def _sync_settlements(client: SpeedClient) -> int:

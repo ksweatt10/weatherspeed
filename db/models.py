@@ -383,7 +383,7 @@ def upsert_bid_from_order(order: dict) -> None:
     initial    = float(order.get("initial_count_fp")    or 0)
     filled     = float(order.get("fill_count_fp")       or 0)
     remaining  = float(order.get("remaining_count_fp")  or 0)
-    queue_pos  = order.get("queue_position_fp")          # null — not returned by Kalshi REST
+    queue_pos  = order.get("queue_position_fp")           # injected by poller after /queue_position call
     queue_pos  = float(queue_pos) if queue_pos is not None else None
     yes_price  = order.get("yes_price_dollars")
     price_cents = round(float(yes_price) * 100) if yes_price else None
