@@ -91,7 +91,12 @@ async def _discover_todays_markets() -> dict[str, list[dict]]:
             return {}
 
         event_tickers = [e[0] for e in today_events]
-        market_map    = await client.get_all_markets_for_events(event_tickers)
+        # Use market_status=None so we find bucket markets even before they
+        # are "open" (they're created ~09:31 UTC, open 14:00 UTC).
+        # The UTC date filter below (open_time.startswith(utc_date)) keeps
+        # results scoped to today only.
+        market_map    = await client.get_all_markets_for_events(
+            event_tickers, market_status=None)
 
         for et, series_ticker, city, kind in today_events:
             markets = market_map.get(et, [])
