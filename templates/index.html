@@ -845,7 +845,8 @@ const SMETA = {
   auto_bid_enabled:    {l:"Auto-Bid Enabled",   d:"Fire bids automatically when the market opens at 14:00 UTC",          t:"bool"},
   track_market_timing: {l:"Track Timing",       d:"Record market creation + open times to the research DB",              t:"bool"},
   // ── Position sizing ───────────────────────────────────────────────────────
-  contracts_per_market:{l:"Contracts / Market", d:"YES contracts per bucket at 1¢ each. Cost = N × $0.01/bucket. Payout = N × $1.00 on the 1 winning YES per series. Profit = N × $0.94 per series if all 6 fill.", t:"int", min:1, max:500},
+  contracts_per_market:{l:"Contracts / Market", d:"YES contracts per bucket. Cost = N × yes_price_cents / 100 per bucket. Payout = N × $1.00 on the winning YES. Profit = N × (100 - yes_price_cents) × 33 / 100 per day.", t:"int", min:1, max:500},
+  yes_price_cents:     {l:"YES Bid Price (¢)",  d:"Cents to bid per YES contract. 1¢ = cheapest, lowest fill priority. 2¢ beats all 1¢ orders on price. Higher price = better queue position but lower profit per win.", t:"int", min:1, max:50},
   // ── Order engine ──────────────────────────────────────────────────────────
   inter_order_ms:      {l:"Inter-Order Delay (ms)", d:"ms between individual order POSTs. 40ms × 198 orders ≈ 8s total. Increase if 429 errors appear at open.", t:"int", min:0, max:500},
   // ── Timing ────────────────────────────────────────────────────────────────

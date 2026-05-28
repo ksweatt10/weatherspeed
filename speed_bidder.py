@@ -90,10 +90,11 @@ async def run_bids() -> None:
     t_open = datetime(_d.year, _d.month, _d.day, _oh, _om, 0,
                       tzinfo=timezone.utc).timestamp()
 
-    dry_run    = runtime_config.get("dry_run",              True)
-    contracts  = runtime_config.get("contracts_per_market", 1)
-    auto_bid   = runtime_config.get("auto_bid_enabled",     True)
-    inter_order_ms  = runtime_config.get("inter_order_ms",  40)
+    dry_run        = runtime_config.get("dry_run",              True)
+    contracts      = runtime_config.get("contracts_per_market", 1)
+    auto_bid       = runtime_config.get("auto_bid_enabled",     True)
+    inter_order_ms = runtime_config.get("inter_order_ms",       40)
+    yes_price_cents = runtime_config.get("yes_price_cents",      1)
 
     if not auto_bid:
         print("[bidder] auto_bid_enabled=False — skipping")
@@ -121,7 +122,7 @@ async def run_bids() -> None:
     total = len(all_markets)
 
     print(f"[bidder] {'DRY RUN' if dry_run else 'LIVE'} — "
-          f"YES at 1¢ on {total} buckets across {len(discovered)} series "
+          f"YES at {yes_price_cents}¢ on {total} buckets across {len(discovered)} series "
           f"({contracts} contracts each)")
 
     # ── Fire batch YES bids + open snapshot concurrently ─────────────────────
@@ -142,11 +143,11 @@ async def run_bids() -> None:
         results, _snap_count = await asyncio.gather(
             client.individual_yes_bids(
                 all_markets,
-                contracts      = contracts,
-                yes_price_cents = 1,
-                dry_run        = dry_run,
-                inter_order_ms = inter_order_ms,
-                t_open         = t_open,
+                contracts       = contracts,
+                yes_price_cents = yes_price_cents,
+                dry_run         = dry_run,
+                inter_order_ms  = inter_order_ms,
+                t_open          = t_open,
             ),
             _snapshot_markets(client, discovered, snapshot_at),
         )

@@ -247,7 +247,7 @@ def api_settings():
 def api_settings_post():
     data = request.get_json() or {}
     bool_keys  = {"dry_run", "auto_bid_enabled", "track_market_timing"}
-    int_keys   = {"contracts_per_market", "inter_order_ms",
+    int_keys   = {"contracts_per_market", "inter_order_ms", "yes_price_cents",
                   "creation_poll_interval_secs",
                   "creation_poll_start_utc_hour",
                   "creation_poll_start_utc_minute",
