@@ -50,14 +50,14 @@ def _next_utc_hhmm(hour: int, minute: int) -> datetime:
 
 async def _discover_todays_markets() -> dict[str, list[dict]]:
     """
-    Poll Kalshi events API for each series, return all currently-open markets.
+    Poll Kalshi events API for each series, return TODAY's newly-created markets.
     {event_ticker: [market_dict, ...]}
 
-    Uses status="open" from the Kalshi API — no UTC date filter needed.
-    Markets are open for ~28 hours (created at 09:31 UTC, settle next day),
-    so a UTC date check would incorrectly drop valid markets after 20:00 UTC.
+    Filters by UTC date so only the markets created in today's 09:31 UTC window
+    are returned — not stale open markets from the previous UTC day.
     """
     today_str = _today_et_str()
+    utc_date  = _utcnow().date().isoformat()
     found: dict[str, list] = {}
 
     poll_secs   = runtime_config.get("creation_poll_interval_secs", 5)
@@ -103,6 +103,12 @@ async def _discover_todays_markets() -> dict[str, list[dict]]:
             open_time    = m0.get("open_time", "")
             settlement   = m0.get("occurrence_datetime", "")[:10]
 
+            # Only keep markets whose open_time is today (UTC).
+            # This excludes stale markets from the previous UTC day that may
+            # still be in "open" status but belong to yesterday's session.
+            if not open_time.startswith(utc_date):
+                continue
+
             if runtime_config.get("track_market_timing", True):
                 upsert_market_timing(et, series_ticker, city, kind,
                                      settlement, created_time, open_time)
@@ -125,7 +131,7 @@ async def _discover_todays_markets() -> dict[str, list[dict]]:
     state.set_discovered_markets(found)
     total_buckets = sum(len(v) for v in found.values())
     print(f"[watcher] Discovered {len(found)} events / "
-          f"{total_buckets} open markets (ET date: {today_str})")
+          f"{total_buckets} markets for UTC {utc_date}")
     log_event(today_str, "MARKETS_DISCOVERED",
               f"{len(found)} events, {total_buckets} buckets")
     return found

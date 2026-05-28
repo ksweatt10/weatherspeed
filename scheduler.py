@@ -81,18 +81,9 @@ def start() -> None:
 
     now = datetime.now(timezone.utc)
 
-    # ── Boot catch-up logic ───────────────────────────────────────────────────
-    # Always try to discover open markets at boot if state is empty.
-    # Kalshi weather markets are open for ~28 hours (created 09:31 UTC, settle
-    # next day), so this works at any time of day — even 01:00 UTC when the
-    # new UTC day has started but yesterday's markets are still open.
-    # If no markets are open yet (pre-creation window), discovery returns {}
-    # and the creation watch at 09:27 UTC will pick them up later.
-    if not state.get_discovered_markets():
-        print("[scheduler] No markets in state — running boot discovery")
-        from market_watcher import run_boot_discovery
-        threading.Thread(target=run_boot_discovery,
-                         name="boot-discovery", daemon=True).start()
+    # ── Boot catch-up: timer fallback only ───────────────────────────────────
+    # Markets are populated exclusively by the creation watch at 09:27 UTC.
+    # No boot discovery — we only want today's fresh markets, not stale ones.
 
     # Missed the 13:59 timer-fallback job while down — start it now if applicable
     if now.hour == 13 and now.minute >= 59:

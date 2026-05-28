@@ -397,9 +397,9 @@ async function api(path, opts={}) {
   return r.json();
 }
 
-// ── Markets table freeze ──────────────────────────────────────────────────────
-// Once bids fire at 10am the table is frozen — no further auto-updates.
-// Only the Refresh button re-renders it (and immediately re-freezes).
+// ── Markets table ─────────────────────────────────────────────────────────────
+// Renders exactly once when markets are first discovered (creation watch ~09:31 UTC).
+// After that it is frozen — only the Refresh button updates it.
 window._mktFrozen = false;
 
 // ── State poll ────────────────────────────────────────────────────────────────
@@ -437,17 +437,14 @@ async function pollState() {
     document.getElementById("ov-mode").textContent    = s.dry_run ? "DRY RUN" : "LIVE";
     document.getElementById("ov-mode").style.color    = s.dry_run ? "var(--yellow)" : "var(--red)";
 
-    // Markets table — frozen after bids fire; Refresh button is the only way to update
-    if (!window._mktFrozen) {
-      // Auto-freeze the moment bids fire (captures the 10am open snapshot)
-      if (s.bids_fired_today) {
-        window._mktFrozen = true;
-      }
+    // Markets table — auto-renders once on first discovery, then frozen.
+    // Refresh button is the only way to update it after that.
+    if (!window._mktFrozen && s.markets.length > 0) {
       renderMarketsTable(s.markets);
+      window._mktFrozen = true;
     }
-    const frozenLabel = window._mktFrozen ? " — frozen at open" : `, ${liveCnt} live`;
     document.getElementById("mkt-count").textContent =
-      s.markets.length ? `(${s.markets.length} buckets${frozenLabel})` : "";
+      s.markets.length ? `(${s.markets.length} buckets)` : "";
     renderErrors(s.errors || []);
   } catch(e) { console.error("poll:", e); }
 }
@@ -832,13 +829,10 @@ async function triggerRefreshMarkets() {
   try {
     const r = await api("/api/refresh-markets");
     toast(r.msg, "ok");
-    // Poll is frozen — fetch state explicitly and re-render table once
     const s = await api("/api/state");
     renderMarketsTable(s.markets);
-    window._mktFrozen = true;  // re-freeze immediately after refresh
-    const liveCnt = s.markets.filter(m => m.ws_live).length;
     document.getElementById("mkt-count").textContent =
-      s.markets.length ? `(${s.markets.length} buckets — refreshed)` : "";
+      s.markets.length ? `(${s.markets.length} buckets)` : "";
   } catch(e) { toast("Error: "+e.message,"err"); }
 }
 
