@@ -311,19 +311,20 @@ def insert_bid(date: str, event_ticker: str, ticker: str, city: str,
                open_interest: float, was_first: bool, dry_run: bool,
                order_id: str | None, status: str,
                ms_after_open: int | None,
-               bid_engine_ms: int | None = None) -> int:
+               bid_engine_ms: int | None = None,
+               side: str = "no") -> int:
     with _conn() as con:
         cur = con.execute("""
             INSERT INTO bid_log
                 (date, event_ticker, ticker, city, bucket_label,
                  contracts, no_price_cents, open_interest,
                  was_first, dry_run, order_id, status, ms_after_open,
-                 bid_engine_ms)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 bid_engine_ms, side)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (date, event_ticker, ticker, city, bucket_label,
               contracts, no_price_cents, open_interest,
               1 if was_first else 0, 1 if dry_run else 0,
-              order_id, status, ms_after_open, bid_engine_ms))
+              order_id, status, ms_after_open, bid_engine_ms, side))
         return cur.lastrowid
 
 

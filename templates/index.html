@@ -242,7 +242,7 @@ input:checked+.slider:before{transform:translateX(18px)}
     <table>
       <thead><tr>
         <th>Time (UTC)</th><th>Ticker</th><th>City</th><th>Bucket</th>
-        <th>NO Price</th><th>Qty</th><th>OI at Bid</th>
+        <th>Side</th><th>Price</th><th>Qty</th><th>OI at Bid</th>
         <th>First?</th><th>ms After Open</th><th>Engine ms</th><th>Status</th><th>Dry?</th>
       </tr></thead>
       <tbody id="bids-tbody"></tbody>
@@ -492,11 +492,16 @@ async function loadBids() {
                : `<span class="pill red">${b.status||"?"}</span>`;
       const dr = b.dry_run ? '<span class="pill yellow">dry</span>' : '<span class="pill blue">live</span>';
       const ts = b.placed_at ? b.placed_at.replace("T"," ").slice(0,19) : "—";
+      const sideYes = (b.side||"no") === "yes";
+      const sidePill = sideYes
+        ? '<span class="pill green">YES</span>'
+        : '<span class="pill blue">NO</span>';
       return `<tr>
         <td class="mono" style="font-size:11px">${ts}</td>
         <td class="mono" style="font-size:10px">${b.ticker||"—"}</td>
         <td>${b.city||"—"}</td>
         <td>${b.bucket_label||"—"}</td>
+        <td>${sidePill}</td>
         <td><strong>${b.no_price_cents||0}¢</strong></td>
         <td>${b.contracts||1}</td>
         <td>${b.open_interest||0}</td>

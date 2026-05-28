@@ -176,6 +176,8 @@ class SpeedWSClient:
         data = {
             "yes_bid_dollars":  msg.get("yes_bid_dollars",  "0"),
             "yes_ask_dollars":  msg.get("yes_ask_dollars",  "0"),
+            "no_bid_dollars":   msg.get("no_bid_dollars",   "0"),
+            "no_ask_dollars":   msg.get("no_ask_dollars",   "0"),
             "open_interest_fp": msg.get("open_interest_fp", "0"),
             "volume_fp":        msg.get("volume_fp",        "0"),
             "ts_ms":            msg.get("ts_ms",            0),

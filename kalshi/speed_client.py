@@ -434,6 +434,160 @@ class SpeedClient:
               f"in {ms_total}ms total")
         return results
 
+    async def batch_yes_bids(self, markets: list[tuple], contracts: int = 1,
+                              yes_price_cents: int = 1,
+                              dry_run: bool = True,
+                              batch_size: int = 30,
+                              batch_concurrency: int = 3,
+                              inter_round_ms: int = 0,
+                              t_open: float | None = None) -> list[dict]:
+        """
+        Place YES limit orders at yes_price_cents on all markets.
+
+        markets: list of (event_ticker, market_dict) tuples from discovered_markets.
+        Fixed price — no filtering, no price reading.  GTC orders sit in the
+        book all day and fill as NO buyers arrive.
+
+        Returns list of result dicts compatible with batch_no_bids output.
+        """
+        import uuid
+        t0 = time.perf_counter()
+        _t_open_wall: float = t_open if t_open is not None else time.time()
+
+        results:  list[dict] = []
+        to_place: list[dict] = []
+
+        for et_or_tuple in markets:
+            # Accept either (event_ticker, market_dict) tuple or plain market_dict
+            if isinstance(et_or_tuple, tuple):
+                _, m = et_or_tuple
+            else:
+                m = et_or_tuple
+
+            ticker = m.get("ticker", "")
+            oi     = float(m.get("open_interest_fp") or 0)
+
+            r = {
+                "ticker":        ticker,
+                "yes_price_cents": yes_price_cents,
+                "open_interest": oi,
+                "contracts":     contracts,
+                "placed":        False,
+                "dry_run":       dry_run,
+                "order_id":      None,
+                "error":         None,
+                "was_first":     oi == 0,
+                "ms_elapsed":    None,
+                "engine_ms":     None,
+            }
+            results.append(r)
+
+            if dry_run:
+                r["placed"]   = True
+                r["order_id"] = "DRY_RUN"
+            to_place.append(r)
+
+        # Stamp dry-run timing and return early
+        if dry_run:
+            engine_ms = round((time.perf_counter() - t0) * 1000)
+            ms_after  = round((time.time() - _t_open_wall) * 1000)
+            for r in to_place:
+                r["ms_elapsed"] = ms_after
+                r["engine_ms"]  = engine_ms
+            return results
+
+        if not to_place:
+            return results
+
+        # ── Build chunk payloads ──────────────────────────────────────────────
+        cid_map: dict[str, dict] = {}
+        order_list = []
+        for r in to_place:
+            cid = f"spd-{uuid.uuid4().hex[:8]}"
+            cid_map[cid] = r
+            order_list.append({
+                "ticker":          r["ticker"],
+                "side":            "yes",
+                "action":          "buy",
+                "count":           r["contracts"],
+                "yes_price":       yes_price_cents,
+                "client_order_id": cid,
+                "time_in_force":   "good_till_canceled",
+            })
+
+        chunks  = [order_list[i: i + batch_size]
+                   for i in range(0, len(order_list), batch_size)]
+        n_chunks = len(chunks)
+        print(f"[speed] firing {len(to_place)} YES@{yes_price_cents}¢ orders "
+              f"across {n_chunks} chunks "
+              f"(size≤{batch_size}, concurrency={batch_concurrency})")
+
+        async def _post_chunk(chunk: list[dict], chunk_idx: int):
+            t1   = time.perf_counter()
+            resp = await self._post("/portfolio/orders/batched",
+                                    {"orders": chunk})
+            t_wall_resp  = time.time()
+            ms_engine    = round((time.perf_counter() - t1) * 1000)
+            ms_from_open = round((t_wall_resp - _t_open_wall) * 1000)
+            print(f"[speed] chunk {chunk_idx+1}/{n_chunks} "
+                  f"({len(chunk)} orders) → {ms_engine}ms rtt / "
+                  f"{ms_from_open}ms after open")
+            return resp, ms_engine, ms_from_open
+
+        responses: list = []
+        for round_start in range(0, n_chunks, batch_concurrency):
+            round_chunks = chunks[round_start: round_start + batch_concurrency]
+            round_tasks  = [
+                _post_chunk(c, round_start + i)
+                for i, c in enumerate(round_chunks)
+            ]
+            round_results = await asyncio.gather(*round_tasks,
+                                                 return_exceptions=True)
+            responses.extend(round_results)
+
+            if inter_round_ms > 0 and round_start + batch_concurrency < n_chunks:
+                await asyncio.sleep(inter_round_ms / 1000)
+
+        ms_total      = round((time.perf_counter() - t0) * 1000)
+        ms_total_open = round((time.time() - _t_open_wall) * 1000)
+
+        for resp_or_exc in responses:
+            if isinstance(resp_or_exc, Exception):
+                print(f"[speed] chunk error: {resp_or_exc}")
+                for r in to_place:
+                    if r["ms_elapsed"] is None:
+                        r["error"]      = str(resp_or_exc)
+                        r["ms_elapsed"] = ms_total_open
+                        r["engine_ms"]  = ms_total
+                continue
+
+            resp, ms_engine, ms_after_open = resp_or_exc
+            for item in resp.get("orders", []):
+                r = cid_map.get(item.get("client_order_id", ""))
+                if not r:
+                    continue
+                if item.get("error"):
+                    r["error"]      = str(item["error"])
+                    r["ms_elapsed"] = ms_after_open
+                    r["engine_ms"]  = ms_engine
+                else:
+                    ord_obj        = item.get("order", {})
+                    r["placed"]    = True
+                    r["order_id"]  = ord_obj.get("order_id") or ord_obj.get("id")
+                    r["ms_elapsed"] = ms_after_open
+                    r["engine_ms"]  = ms_engine
+
+        for r in to_place:
+            if r["ms_elapsed"] is None:
+                r["error"]      = "no response"
+                r["ms_elapsed"] = ms_total_open
+                r["engine_ms"]  = ms_total
+
+        placed = sum(1 for r in to_place if r["placed"])
+        print(f"[speed] batch complete — {placed}/{len(to_place)} placed "
+              f"in {ms_total}ms total")
+        return results
+
     async def bid_no_all(self, markets: list[dict], contracts: int = 1,
                           max_no_cents: int = 99,
                           min_no_cents: int = 50,
