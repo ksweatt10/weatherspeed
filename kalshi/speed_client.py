@@ -181,17 +181,20 @@ class SpeedClient:
         """Cancel a single resting order by ID."""
         return await self._delete(f"/portfolio/orders/{order_id}")
 
-    async def cancel_orders(self, order_ids: list[str]) -> list[dict]:
-        """Cancel multiple orders concurrently. Returns list of results."""
-        tasks = [self.cancel_order(oid) for oid in order_ids]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        out = []
-        for oid, r in zip(order_ids, results):
-            if isinstance(r, Exception):
-                out.append({"order_id": oid, "ok": False, "error": str(r)})
-            else:
-                out.append({"order_id": oid, "ok": True})
-        return out
+    async def cancel_orders(self, order_ids: list[str],
+                             concurrency: int = 3) -> list[dict]:
+        """Cancel multiple orders with limited concurrency to avoid 429s."""
+        sem = asyncio.Semaphore(concurrency)
+
+        async def _cancel_one(oid: str) -> dict:
+            async with sem:
+                try:
+                    await self.cancel_order(oid)
+                    return {"order_id": oid, "ok": True}
+                except Exception as e:
+                    return {"order_id": oid, "ok": False, "error": str(e)}
+
+        return list(await asyncio.gather(*[_cancel_one(oid) for oid in order_ids]))
 
     # ── Trades ───────────────────────────────────────────────────────────────
 
