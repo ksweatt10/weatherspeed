@@ -221,8 +221,9 @@ class SpeedWSClient:
                     ping_interval=20,
                     ping_timeout=10,
                 ) as ws:
-                    self._ws = ws
-                    backoff  = 1
+                    self._ws              = ws
+                    backoff               = 1
+                    self._activated_fired = False   # reset each new connection so daily rearm works
                     _state_module.set_ws_connected(True, len(self._subscribed_tickers))
                     log.info("[ws] connected")
 
