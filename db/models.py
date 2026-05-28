@@ -394,7 +394,7 @@ def upsert_bid_from_order(order: dict) -> None:
     now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     with _conn() as con:
-        # Try to update an existing row for this ticker on this date
+        # Update the single most-recent row for this ticker+date (avoids multi-row update)
         cur = con.execute("""
             UPDATE bid_log SET
                 order_id        = ?,
@@ -403,14 +403,17 @@ def upsert_bid_from_order(order: dict) -> None:
                 fill_count      = ?,
                 fill_price_cents = ?,
                 synced_at       = ?
-            WHERE ticker = ? AND date = ?
-              AND (order_id IS NULL OR order_id = ? OR status LIKE 'skip:%')
+            WHERE id = (
+                SELECT id FROM bid_log
+                WHERE ticker = ? AND date = ?
+                  AND (order_id IS NULL OR order_id = ? OR status LIKE 'skip:%')
+                ORDER BY id DESC LIMIT 1
+            )
         """, (order_id, status_raw, int(filled), price_cents, now_iso,
               ticker, date_et, order_id))
 
         if cur.rowcount == 0:
             # No existing row — insert a minimal one so the poller data appears
-            # (event_ticker and bucket_label left blank; filled in by backfill if needed)
             con.execute("""
                 INSERT OR IGNORE INTO bid_log
                     (date, event_ticker, ticker, side, contracts, no_price_cents,
