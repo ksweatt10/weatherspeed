@@ -148,6 +148,59 @@ def api_cancel_resting():
     })
 
 
+@app.get("/api/test-rate-limit")
+def api_test_rate_limit():
+    """
+    Fire N consecutive GET /portfolio/orders requests at inter_order_ms delay.
+    Reports per-request timing and any 429s to validate rate limit headroom.
+    """
+    import asyncio, time as _t
+    from kalshi.speed_client import SpeedClient
+
+    n        = int(request.args.get("n",   20))
+    delay_ms = int(request.args.get("ms",   5))
+
+    async def _run():
+        results = []
+        async with SpeedClient() as client:
+            t0 = _t.perf_counter()
+            for i in range(n):
+                t1  = _t.perf_counter()
+                ok  = False
+                err = None
+                try:
+                    await client._get("/portfolio/orders", {"limit": 1})
+                    ok = True
+                except Exception as e:
+                    err = str(e)
+                ms = round((_t.perf_counter() - t1) * 1000)
+                results.append({
+                    "i":      i + 1,
+                    "ok":     ok,
+                    "ms":     ms,
+                    "error":  err,
+                    "is_429": err is not None and "429" in str(err),
+                })
+                if delay_ms > 0 and i < n - 1:
+                    await asyncio.sleep(delay_ms / 1000)
+            total_ms = round((_t.perf_counter() - t0) * 1000)
+        return results, total_ms
+
+    results, total_ms = asyncio.run(_run())
+    hits_429  = [r for r in results if r["is_429"]]
+    avg_ms    = round(sum(r["ms"] for r in results) / len(results), 1)
+
+    return jsonify({
+        "n":           n,
+        "delay_ms":    delay_ms,
+        "total_ms":    total_ms,
+        "avg_rtt_ms":  avg_ms,
+        "ok":          len(results) - len(hits_429),
+        "rate_limited": len(hits_429),
+        "detail":      results,
+    })
+
+
 @app.get("/api/research")
 def api_research():
     timing       = get_market_timing_history(days=60)
