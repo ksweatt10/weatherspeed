@@ -11,9 +11,7 @@ _defaults: dict = {
     "dry_run":              True,    # True = evaluate only, never place real orders
     "auto_bid_enabled":     True,    # actually fire orders at market open
     "contracts_per_market": 1,       # YES contracts per bucket (cost = N × $0.01)
-    "batch_size":           30,      # orders per batch POST (Kalshi limit ~30)
-    "batch_concurrency":    3,       # max simultaneous batch requests in flight
-    "batch_inter_round_ms": 0,       # ms sleep between rounds (0 = RTT-only spacing)
+    "inter_order_ms":       40,      # ms between individual order POSTs (~8s for 198 orders)
 
     # ── Timing ───────────────────────────────────────────────────────────────
     # Markets created daily ~09:30–09:31 UTC; open exactly 14:00:00 UTC

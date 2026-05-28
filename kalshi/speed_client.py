@@ -388,3 +388,96 @@ class SpeedClient:
               f"in {ms_total}ms total")
         return results
 
+    async def individual_yes_bids(self, markets: list[tuple], contracts: int = 1,
+                                   yes_price_cents: int = 1,
+                                   dry_run: bool = True,
+                                   inter_order_ms: int = 40,
+                                   t_open: float | None = None) -> list[dict]:
+        """
+        Place YES limit orders one at a time via POST /portfolio/orders.
+
+        Slower than batch (~8s for 198 orders at 40ms/order) but immune to the
+        stricter per-endpoint rate limit on the batched endpoint.  Used as the
+        primary placement path since the batch endpoint 429s at market open.
+
+        markets: list of (event_ticker, market_dict) tuples.
+        Returns same result-dict list as batch_yes_bids for drop-in compatibility.
+        """
+        import uuid
+        t0 = time.perf_counter()
+        _t_open_wall: float = t_open if t_open is not None else time.time()
+
+        results:  list[dict] = []
+
+        for et_or_tuple in markets:
+            if isinstance(et_or_tuple, tuple):
+                _, m = et_or_tuple
+            else:
+                m = et_or_tuple
+
+            ticker = m.get("ticker", "")
+            oi     = float(m.get("open_interest_fp") or 0)
+
+            r = {
+                "ticker":          ticker,
+                "yes_price_cents": yes_price_cents,
+                "open_interest":   oi,
+                "contracts":       contracts,
+                "placed":          False,
+                "dry_run":         dry_run,
+                "order_id":        None,
+                "error":           None,
+                "was_first":       oi == 0,
+                "ms_elapsed":      None,
+                "engine_ms":       None,
+            }
+            results.append(r)
+
+            if dry_run:
+                r["placed"]   = True
+                r["order_id"] = "DRY_RUN"
+                r["ms_elapsed"] = 0
+                r["engine_ms"]  = 0
+                continue
+
+            cid  = f"ws-{uuid.uuid4().hex[:8]}"
+            body = {
+                "ticker":          ticker,
+                "side":            "yes",
+                "action":          "buy",
+                "count":           contracts,
+                "yes_price":       yes_price_cents,
+                "client_order_id": cid,
+                "time_in_force":   "good_till_canceled",
+            }
+
+            for attempt in range(3):
+                try:
+                    resp = await self._post("/portfolio/orders", body)
+                    t_wall_resp  = time.time()
+                    ms_from_open = round((t_wall_resp - _t_open_wall) * 1000)
+                    ms_engine    = round((time.perf_counter() - t0) * 1000)
+                    ord_obj      = resp.get("order", resp)
+                    r["placed"]    = True
+                    r["order_id"]  = ord_obj.get("order_id") or ord_obj.get("id")
+                    r["ms_elapsed"] = ms_from_open
+                    r["engine_ms"]  = ms_engine
+                    break
+                except Exception as exc:
+                    if "429" in str(exc) and attempt < 2:
+                        await asyncio.sleep(1.0 * (attempt + 1))
+                        continue
+                    r["error"]      = str(exc)
+                    r["ms_elapsed"] = round((time.time() - _t_open_wall) * 1000)
+                    r["engine_ms"]  = round((time.perf_counter() - t0) * 1000)
+                    break
+
+            if inter_order_ms > 0:
+                await asyncio.sleep(inter_order_ms / 1000)
+
+        ms_total = round((time.perf_counter() - t0) * 1000)
+        placed   = sum(1 for r in results if r.get("placed"))
+        print(f"[speed] individual complete — {placed}/{len(results)} placed "
+              f"in {ms_total}ms total")
+        return results
+

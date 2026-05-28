@@ -72,9 +72,7 @@ async def run_bids() -> None:
     dry_run    = runtime_config.get("dry_run",              True)
     contracts  = runtime_config.get("contracts_per_market", 1)
     auto_bid   = runtime_config.get("auto_bid_enabled",     True)
-    batch_size      = runtime_config.get("batch_size",             30)
-    batch_conc      = runtime_config.get("batch_concurrency",      3)
-    inter_round_ms  = runtime_config.get("batch_inter_round_ms",   0)
+    inter_order_ms  = runtime_config.get("inter_order_ms",  40)
 
     if not auto_bid:
         print("[bidder] auto_bid_enabled=False — skipping")
@@ -111,15 +109,13 @@ async def run_bids() -> None:
 
     async with SpeedClient() as client:
         results, _snap_count = await asyncio.gather(
-            client.batch_yes_bids(
+            client.individual_yes_bids(
                 all_markets,
-                contracts         = contracts,
-                yes_price_cents   = 1,
-                dry_run           = dry_run,
-                batch_size        = batch_size,
-                batch_concurrency = batch_conc,
-                inter_round_ms    = inter_round_ms,
-                t_open            = t_open,
+                contracts      = contracts,
+                yes_price_cents = 1,
+                dry_run        = dry_run,
+                inter_order_ms = inter_order_ms,
+                t_open         = t_open,
             ),
             _snapshot_markets(client, discovered, snapshot_at),
         )
