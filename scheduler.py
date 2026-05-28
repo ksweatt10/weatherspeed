@@ -82,11 +82,14 @@ def start() -> None:
     now = datetime.now(timezone.utc)
 
     # ── Boot catch-up logic ───────────────────────────────────────────────────
-    # If we restart after the creation window (09:27 UTC), discover currently-
-    # open markets right away so the WS ticker-sync loop has something to work with.
-    past_creation = now.hour > 9 or (now.hour == 9 and now.minute >= 27)
-    if past_creation and not state.get_discovered_markets():
-        print("[scheduler] Post-creation restart — running boot discovery")
+    # Always try to discover open markets at boot if state is empty.
+    # Kalshi weather markets are open for ~28 hours (created 09:31 UTC, settle
+    # next day), so this works at any time of day — even 01:00 UTC when the
+    # new UTC day has started but yesterday's markets are still open.
+    # If no markets are open yet (pre-creation window), discovery returns {}
+    # and the creation watch at 09:27 UTC will pick them up later.
+    if not state.get_discovered_markets():
+        print("[scheduler] No markets in state — running boot discovery")
         from market_watcher import run_boot_discovery
         threading.Thread(target=run_boot_discovery,
                          name="boot-discovery", daemon=True).start()
