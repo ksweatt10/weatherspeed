@@ -177,7 +177,7 @@ async def run_bids() -> None:
             city           = city_map.get(ticker, ""),
             bucket_label   = label_map.get(ticker, ""),
             contracts      = contracts,
-            no_price_cents = 1,
+            no_price_cents = yes_price_cents,
             open_interest  = r.get("open_interest", 0),
             was_first      = r.get("was_first", False),
             dry_run        = dry_run,
