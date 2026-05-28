@@ -20,6 +20,27 @@ import state
 from db.models import insert_bid, log_event, upsert_open_snapshot
 from kalshi.speed_client import SpeedClient
 
+# Pre-warmed client — set by prewarm_for_open(), consumed by run_bids()
+_warm_client: SpeedClient | None = None
+
+
+async def prewarm_for_open() -> None:
+    """
+    Open the SpeedClient session ~10s before market open and fire a dummy
+    GET to complete the TCP + TLS handshake.  Saves ~30ms on the very first
+    order at 14:00:00 by reusing an already-established connection.
+    Called by scheduler at 13:59:50 UTC.
+    """
+    global _warm_client
+    client = SpeedClient()
+    await client.__aenter__()
+    try:
+        await client._get("/portfolio/orders", params={"limit": "1"})
+        print("[bidder] Pre-warm OK — TCP+TLS ready for 14:00:00")
+    except Exception as exc:
+        print(f"[bidder] Pre-warm warning (non-fatal): {exc}")
+    _warm_client = client
+
 
 def _today_et() -> str:
     from datetime import timedelta
@@ -107,7 +128,17 @@ async def run_bids() -> None:
     t_bid       = time.perf_counter()
     snapshot_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
-    async with SpeedClient() as client:
+    global _warm_client
+    client = _warm_client
+    _warm_client = None
+    if client is not None:
+        print("[bidder] Using pre-warmed connection")
+    else:
+        print("[bidder] No pre-warm — opening fresh connection")
+        client = SpeedClient()
+        await client.__aenter__()
+
+    try:
         results, _snap_count = await asyncio.gather(
             client.individual_yes_bids(
                 all_markets,
@@ -119,6 +150,8 @@ async def run_bids() -> None:
             ),
             _snapshot_markets(client, discovered, snapshot_at),
         )
+    finally:
+        await client.__aexit__(None, None, None)
 
     ms_bid = round((time.perf_counter() - t_bid) * 1000)
 

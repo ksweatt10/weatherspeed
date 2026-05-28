@@ -51,6 +51,15 @@ def _start_open_trigger():
                      name="timer-fallback", daemon=True).start()
 
 
+def _start_prewarm():
+    import asyncio
+    from speed_bidder import prewarm_for_open
+    threading.Thread(
+        target=lambda: asyncio.run(prewarm_for_open()),
+        name="prewarm", daemon=True,
+    ).start()
+
+
 def _daily_rearm():
     """
     Called at 09:27 UTC each day.
@@ -73,6 +82,10 @@ def start() -> None:
     # 09:27 UTC: reset bid-fired flag + start creation watch + ensure WS alive
     sched.add_job(_daily_rearm, "cron",
                   hour=9, minute=27, id="daily_rearm")
+
+    # 13:59:50 UTC: pre-warm TCP+TLS connection 10s before open
+    sched.add_job(_start_prewarm, "cron",
+                  hour=13, minute=59, second=50, id="prewarm")
 
     # 13:59 UTC: start timer fallback (fires at 14:00:05 if WS missed)
     sched.add_job(_start_open_trigger, "cron",
@@ -105,7 +118,8 @@ def start() -> None:
 
     print(
         "[scheduler] Armed —\n"
-        "  WS watcher: 24/7 (started at boot, auto-reconnects)\n"
-        "  09:27 UTC  creation watch + bids-fired reset\n"
-        "  13:59 UTC  timer fallback (fires 14:00:05 UTC if WS path missed)"
+        "  WS watcher:  24/7 (started at boot, auto-reconnects)\n"
+        "  09:27 UTC   creation watch + bids-fired reset\n"
+        "  13:59:50 UTC TCP pre-warm (SpeedClient session + dummy GET)\n"
+        "  13:59 UTC   timer fallback (fires 14:00:05 UTC if WS path missed)"
     )
