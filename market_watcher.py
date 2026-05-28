@@ -68,7 +68,10 @@ async def _discover_todays_markets() -> dict[str, list[dict]]:
 
         async def _fetch_series(series_ticker: str):
             try:
-                events = await client.list_events(series_ticker, status="open")
+                # status=None — no filter. New markets have status "initialized"
+                # (not "open") before 14:00 UTC. UTC date filter below keeps
+                # results scoped to today only.
+                events = await client.list_events(series_ticker, status=None)
                 return series_ticker, events
             except Exception as e:
                 print(f"[watcher] {series_ticker} error: {e}")
