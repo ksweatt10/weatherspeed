@@ -299,6 +299,7 @@ input:checked+.slider:before{transform:translateX(18px)}
   <p style="color:var(--muted);font-size:11px;margin-bottom:10px">
     All fields from the Kalshi trades API for the <em>first</em> executed trade on each bucket.
     YES/NO prices in cents. ms = milliseconds after 14:00:00 UTC market open.
+    <strong style="color:var(--text)">Open YES¢ / NO¢</strong> = prices captured at market open simultaneously with bid placement.
   </p>
   <div class="tw" style="margin-bottom:20px">
     <table id="ft-table">
@@ -306,6 +307,8 @@ input:checked+.slider:before{transform:translateX(18px)}
         <th>Settlement</th><th>City</th><th>Kind</th>
         <th>Bucket</th><th>First Trade (ET)</th><th>ms After Open</th>
         <th>Contracts</th><th>YES ¢</th><th>NO ¢</th><th>Taker</th>
+        <th title="YES ask at 10am open snapshot">Open YES¢</th>
+        <th title="NO ask at 10am open snapshot">Open NO¢</th>
       </tr></thead>
       <tbody id="ft-tbody"></tbody>
     </table>
@@ -690,6 +693,11 @@ function renderFirstTradesTable(rows) {
         ? '<span class="pill red" style="font-size:10px">NO</span>'
         : '<span style="color:var(--muted)">—</span>';
 
+    const openYes = r.open_yes_ask != null
+      ? Math.round(r.open_yes_ask * 100) + "¢" : "—";
+    const openNo  = r.open_no_ask  != null
+      ? Math.round(r.open_no_ask  * 100) + "¢" : "—";
+
     return `<tr>
       <td>${r.settlement_date||"—"}</td>
       <td>${r.city||"—"}</td>
@@ -701,6 +709,8 @@ function renderFirstTradesTable(rows) {
       <td>${yesCents}</td>
       <td>${noCents}</td>
       <td>${takerPill}</td>
+      <td class="mono" style="color:var(--green)">${openYes}</td>
+      <td class="mono" style="color:var(--yellow)">${openNo}</td>
     </tr>`;
   }).join("");
 }

@@ -92,6 +92,10 @@ def init_db() -> None:
         _safe_add_column(con, "market_buckets", "first_trade_yes_price",   "REAL")
         _safe_add_column(con, "market_buckets", "first_trade_no_price",    "REAL")
         _safe_add_column(con, "market_buckets", "first_trade_taker_side",  "TEXT")
+        _safe_add_column(con, "market_buckets", "open_yes_ask",            "REAL")
+        _safe_add_column(con, "market_buckets", "open_no_ask",             "REAL")
+        _safe_add_column(con, "market_buckets", "open_oi",                 "REAL")
+        _safe_add_column(con, "market_buckets", "open_snapshot_at",        "TEXT")
 
 
 def _safe_add_column(con, table: str, col: str, dtype: str) -> None:
@@ -213,6 +217,20 @@ def _ms_to_iso(ts_ms: int) -> str:
     )[:-3] + "Z"
 
 
+def upsert_open_snapshot(ticker: str, yes_ask: float, no_ask: float,
+                          oi: float, snapshot_at: str) -> None:
+    """Record live market prices captured at market open (10am ET)."""
+    with _conn() as con:
+        con.execute("""
+            UPDATE market_buckets SET
+                open_yes_ask     = ?,
+                open_no_ask      = ?,
+                open_oi          = ?,
+                open_snapshot_at = ?
+            WHERE ticker = ?
+        """, (yes_ask, no_ask, oi, snapshot_at, ticker))
+
+
 def upsert_market_bucket(event_ticker: str, ticker: str, bucket_label: str,
                           floor_strike, cap_strike,
                           created_time: str, open_time: str) -> None:
@@ -276,6 +294,10 @@ def get_first_trades_for_research() -> list[dict]:
                 mb.first_trade_yes_price,
                 mb.first_trade_no_price,
                 mb.first_trade_taker_side,
+                mb.open_yes_ask,
+                mb.open_no_ask,
+                mb.open_oi,
+                mb.open_snapshot_at,
                 mt.city,
                 mt.kind,
                 mt.settlement_date,

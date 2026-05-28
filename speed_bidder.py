@@ -11,18 +11,48 @@ No price fetching needed — fixed 1¢ YES limit orders (GTC) on all tickers.
 Orders sit in the book all day and fill as NO buyers arrive.
 """
 from __future__ import annotations
+import asyncio
 import time
 from datetime import datetime, timezone
 
 import runtime_config
 import state
-from db.models import insert_bid, log_event
+from db.models import insert_bid, log_event, upsert_open_snapshot
 from kalshi.speed_client import SpeedClient
 
 
 def _today_et() -> str:
     from datetime import timedelta
     return (datetime.now(timezone.utc) + timedelta(hours=-4)).date().isoformat()
+
+
+async def _snapshot_markets(client, discovered: dict, snapshot_at: str) -> int:
+    """
+    Fetch live REST prices for all discovered markets concurrently with bid placement.
+    Stores open_yes_ask, open_no_ask, open_oi, open_snapshot_at into market_buckets.
+    Fires at the same moment as YES bids via asyncio.gather — zero added latency.
+    """
+    event_tickers = list(discovered.keys())
+    try:
+        market_map = await client.get_all_markets_for_events(
+            event_tickers, concurrency=10)
+    except Exception as exc:
+        print(f"[bidder] snapshot fetch error: {exc}")
+        return 0
+
+    count = 0
+    for et, markets in market_map.items():
+        for m in markets:
+            ticker  = m.get("ticker", "")
+            yes_ask = float(m.get("yes_ask_dollars")  or 0)
+            no_ask  = float(m.get("no_ask_dollars")   or 0)
+            oi      = float(m.get("open_interest_fp") or 0)
+            if ticker:
+                upsert_open_snapshot(ticker, yes_ask, no_ask, oi, snapshot_at)
+                count += 1
+
+    print(f"[bidder] open snapshot saved {count} prices at {snapshot_at}")
+    return count
 
 
 async def run_bids() -> None:
@@ -74,18 +104,22 @@ async def run_bids() -> None:
           f"YES at 1¢ on {total} buckets across {len(discovered)} series "
           f"({contracts} contracts each)")
 
-    # ── Fire batch YES bids ───────────────────────────────────────────────────
-    t_bid = time.perf_counter()
+    # ── Fire batch YES bids + open snapshot concurrently ─────────────────────
+    t_bid       = time.perf_counter()
+    snapshot_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
     async with SpeedClient() as client:
-        results = await client.batch_yes_bids(
-            all_markets,
-            contracts         = contracts,
-            yes_price_cents   = 1,
-            dry_run           = dry_run,
-            batch_size        = batch_size,
-            batch_concurrency = batch_conc,
-            t_open            = t_open,
+        results, _snap_count = await asyncio.gather(
+            client.batch_yes_bids(
+                all_markets,
+                contracts         = contracts,
+                yes_price_cents   = 1,
+                dry_run           = dry_run,
+                batch_size        = batch_size,
+                batch_concurrency = batch_conc,
+                t_open            = t_open,
+            ),
+            _snapshot_markets(client, discovered, snapshot_at),
         )
 
     ms_bid = round((time.perf_counter() - t_bid) * 1000)
