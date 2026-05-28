@@ -277,18 +277,25 @@ def api_test_live_bids():
         from kalshi.speed_client import SpeedClient
 
         discovered = state.get_discovered_markets()
-        if not discovered:
-            return {"ok": False, "error": "no markets discovered — run Refresh Markets first"}
-
-        tickers = [
-            m.get("ticker", "")
-            for mkts in discovered.values()
-            for m in mkts
-            if m.get("ticker")
-        ][:n]
+        if discovered:
+            tickers = [
+                m.get("ticker", "")
+                for mkts in discovered.values()
+                for m in mkts
+                if m.get("ticker")
+            ][:n]
+        else:
+            # Outside discovery window — pull recent tickers directly from DB
+            from db.models import _conn as _db_conn
+            with _db_conn() as con:
+                rows = con.execute(
+                    "SELECT ticker FROM market_buckets ORDER BY open_time DESC LIMIT ?",
+                    (n,)
+                ).fetchall()
+            tickers = [r[0] for r in rows if r[0]]
 
         if not tickers:
-            return {"ok": False, "error": "no tickers available"}
+            return {"ok": False, "error": "no tickers available — run Backfill 7 Days first"}
 
         # Build batch payload — YES@1¢ GTC, identical structure to live engine
         orders_payload = [
