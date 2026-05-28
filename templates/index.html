@@ -816,10 +816,8 @@ const SMETA = {
   track_market_timing: {l:"Track Timing",       d:"Record market creation + open times to the research DB",              t:"bool"},
   // ── Position sizing ───────────────────────────────────────────────────────
   contracts_per_market:{l:"Contracts / Market", d:"YES contracts per bucket at 1¢ each. Cost = N × $0.01/bucket. Payout = N × $1.00 on the 1 winning YES per series. Profit = N × $0.94 per series if all 6 fill.", t:"int", min:1, max:500},
-  // ── Batch engine ──────────────────────────────────────────────────────────
-  batch_size:          {l:"Batch Size",         d:"Orders per batch POST chunk (Kalshi limit ≈30). 198 orders ÷ 30 = 7 chunks.", t:"int", min:1, max:30},
-  batch_concurrency:   {l:"Batch Concurrency",  d:"Simultaneous chunk POSTs per round. 3 chunks × ~47ms RTT ≈ 141ms for all orders.", t:"int", min:1, max:5},
-  batch_inter_round_ms:{l:"Inter-Round Delay",  d:"Extra ms sleep between rounds (0 = RTT-only). Increase if 429 rate-limit errors appear at open.", t:"int", min:0, max:2000},
+  // ── Order engine ──────────────────────────────────────────────────────────
+  inter_order_ms:      {l:"Inter-Order Delay (ms)", d:"ms between individual order POSTs. 40ms × 198 orders ≈ 8s total. Increase if 429 errors appear at open.", t:"int", min:0, max:500},
   // ── Timing ────────────────────────────────────────────────────────────────
   creation_poll_interval_secs:{l:"Poll Interval (s)",d:"Seconds between creation-watch polls (09:28–09:31 UTC window)", t:"int", min:1, max:60},
   creation_poll_start_utc_hour:  {l:"Watch Start Hour",  d:"UTC hour to begin creation polling (default 9 = 9 UTC)", t:"int", min:0, max:23},
