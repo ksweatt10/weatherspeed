@@ -149,14 +149,15 @@ def api_settings():
 def api_settings_post():
     data = request.get_json() or {}
     bool_keys  = {"dry_run", "auto_bid_enabled", "track_market_timing"}
-    int_keys   = {"contracts_per_market",
+    int_keys   = {"contracts_per_market", "inter_order_ms",
                   "creation_poll_interval_secs",
                   "creation_poll_start_utc_hour",
                   "creation_poll_start_utc_minute",
-                  "open_time_utc_hour", "open_time_utc_minute",
-                  "batch_size", "batch_concurrency", "batch_inter_round_ms"}
+                  "open_time_utc_hour", "open_time_utc_minute"}
     float_keys: set = set()
     for k, v in data.items():
+        if v is None:
+            continue   # skip keys the dashboard sends as null
         if k in bool_keys:
             runtime_config.set(k, bool(v))
         elif k in int_keys:

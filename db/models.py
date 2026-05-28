@@ -12,6 +12,7 @@ import sqlite3
 import threading
 import time
 import os
+from datetime import datetime, timezone, timedelta
 
 _DB_PATH = os.getenv("DB_PATH", "weatherspeed.db")
 _local   = threading.local()
@@ -385,7 +386,6 @@ def upsert_bid_from_order(order: dict) -> None:
     created    = order.get("created_time", "")
     # Derive date in ET from created_time
     try:
-        from datetime import timedelta
         dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
         date_et = (dt + timedelta(hours=-4)).date().isoformat()
     except Exception:
