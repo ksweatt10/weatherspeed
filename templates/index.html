@@ -246,7 +246,7 @@ input:checked+.slider:before{transform:translateX(18px)}
       <thead><tr>
         <th>City</th><th>Ticker</th><th>Bucket</th><th>Qty</th>
         <th>OI at Bid</th><th>First?</th><th>ms After Open</th><th>Engine ms</th><th>Dry?</th>
-        <th>Order</th><th>Filled</th>
+        <th>Order</th><th>Filled</th><th>Remaining</th><th>Queue Pos</th>
         <th>Result</th><th>Settlement</th><th>Settled At</th><th>P&amp;L</th>
       </tr></thead>
       <tbody id="bids-tbody"></tbody>
@@ -594,6 +594,8 @@ async function loadBids() {
         <td>${dr}</td>
         <td>${orderPill}</td>
         <td>${fillStr}</td>
+        <td style="font-size:11px">${b.remaining_count != null ? b.remaining_count : "—"}</td>
+        <td style="font-size:11px">${b.queue_position != null ? b.queue_position : "—"}</td>
         <td>${resPill}</td>
         <td>${expVal}</td>
         <td style="font-size:11px;white-space:nowrap">${settledStr}</td>

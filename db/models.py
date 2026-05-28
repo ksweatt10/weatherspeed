@@ -106,14 +106,16 @@ def init_db() -> None:
         _safe_add_column(con, "market_buckets", "open_oi",                 "REAL")
         _safe_add_column(con, "market_buckets", "open_snapshot_at",        "TEXT")
         # Order lifecycle tracking (added for live-order monitoring)
-        _safe_add_column(con, "bid_log", "order_status",    "TEXT")
-        _safe_add_column(con, "bid_log", "fill_count",      "INTEGER")
-        _safe_add_column(con, "bid_log", "fill_price_cents","INTEGER")
-        _safe_add_column(con, "bid_log", "market_result",   "TEXT")
-        _safe_add_column(con, "bid_log", "expiration_value","TEXT")
-        _safe_add_column(con, "bid_log", "settled_at",      "TEXT")
-        _safe_add_column(con, "bid_log", "pnl_cents",       "INTEGER")
-        _safe_add_column(con, "bid_log", "synced_at",       "TEXT")
+        _safe_add_column(con, "bid_log", "order_status",      "TEXT")
+        _safe_add_column(con, "bid_log", "fill_count",        "INTEGER")
+        _safe_add_column(con, "bid_log", "fill_price_cents",  "INTEGER")
+        _safe_add_column(con, "bid_log", "remaining_count",   "REAL")
+        _safe_add_column(con, "bid_log", "queue_position",    "REAL")
+        _safe_add_column(con, "bid_log", "market_result",     "TEXT")
+        _safe_add_column(con, "bid_log", "expiration_value",  "TEXT")
+        _safe_add_column(con, "bid_log", "settled_at",        "TEXT")
+        _safe_add_column(con, "bid_log", "pnl_cents",         "INTEGER")
+        _safe_add_column(con, "bid_log", "synced_at",         "TEXT")
 
 
 def _safe_add_column(con, table: str, col: str, dtype: str) -> None:
@@ -378,9 +380,11 @@ def upsert_bid_from_order(order: dict) -> None:
     ticker     = order.get("ticker", "")
     order_id   = order.get("order_id", "")
     status_raw = order.get("status", "")       # "resting" | "filled" | "canceled"
-    initial    = float(order.get("initial_count_fp") or 0)
-    filled     = float(order.get("fill_count_fp")    or 0)
-    remaining  = float(order.get("remaining_count_fp") or 0)
+    initial    = float(order.get("initial_count_fp")    or 0)
+    filled     = float(order.get("fill_count_fp")       or 0)
+    remaining  = float(order.get("remaining_count_fp")  or 0)
+    queue_pos  = order.get("queue_position_fp")          # null — not returned by Kalshi REST
+    queue_pos  = float(queue_pos) if queue_pos is not None else None
     yes_price  = order.get("yes_price_dollars")
     price_cents = round(float(yes_price) * 100) if yes_price else None
     created    = order.get("created_time", "")
@@ -397,19 +401,22 @@ def upsert_bid_from_order(order: dict) -> None:
         # Update the single most-recent row for this ticker+date (avoids multi-row update)
         cur = con.execute("""
             UPDATE bid_log SET
-                order_id        = ?,
-                status          = 'placed',
-                order_status    = ?,
-                fill_count      = ?,
+                order_id         = ?,
+                status           = 'placed',
+                order_status     = ?,
+                fill_count       = ?,
                 fill_price_cents = ?,
-                synced_at       = ?
+                remaining_count  = ?,
+                queue_position   = ?,
+                synced_at        = ?
             WHERE id = (
                 SELECT id FROM bid_log
                 WHERE ticker = ? AND date = ?
                   AND (order_id IS NULL OR order_id = ? OR status LIKE 'skip:%')
                 ORDER BY id DESC LIMIT 1
             )
-        """, (order_id, status_raw, int(filled), price_cents, now_iso,
+        """, (order_id, status_raw, int(filled), price_cents,
+              remaining, queue_pos, now_iso,
               ticker, date_et, order_id))
 
         if cur.rowcount == 0:
@@ -418,10 +425,12 @@ def upsert_bid_from_order(order: dict) -> None:
                 INSERT OR IGNORE INTO bid_log
                     (date, event_ticker, ticker, side, contracts, no_price_cents,
                      dry_run, order_id, status, placed_at,
-                     order_status, fill_count, fill_price_cents, synced_at)
-                VALUES (?,?,?,'yes',?,1, 0,?,'placed',?,?,?,?,?)
+                     order_status, fill_count, fill_price_cents,
+                     remaining_count, queue_position, synced_at)
+                VALUES (?,?,?,'yes',?,1, 0,?,'placed',?,?,?,?,?,?,?)
             """, (date_et, "", ticker, int(initial), order_id, created,
-                  status_raw, int(filled), price_cents, now_iso))
+                  status_raw, int(filled), price_cents,
+                  remaining, queue_pos, now_iso))
 
 
 def mark_bid_settled(ticker: str, market_result: str, expiration_value: str,
