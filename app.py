@@ -358,7 +358,8 @@ def api_test_live_bids():
 
             total_ms = round((_t.perf_counter() - t_total) * 1000)
 
-            # Cancel all placed orders immediately
+            # Brief pause so rate-limit bucket refills before cancel sweep
+            await asyncio.sleep(0.5)
             cancels = await client.cancel_orders(placed_ids)
 
         placed  = sum(1 for r in order_rows if r["order_id"] and not r["error"])
