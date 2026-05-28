@@ -732,18 +732,13 @@ const SMETA = {
   // ── Mode ──────────────────────────────────────────────────────────────────
   dry_run:             {l:"Dry Run",            d:"Simulate bids — evaluate and log, but never place real orders",       t:"bool"},
   auto_bid_enabled:    {l:"Auto-Bid Enabled",   d:"Fire bids automatically when the market opens at 14:00 UTC",          t:"bool"},
-  bid_only_zero_oi:    {l:"First-Only Mode",    d:"Only bid when open interest = 0 on that bucket (you are first in)",   t:"bool"},
   track_market_timing: {l:"Track Timing",       d:"Record market creation + open times to the research DB",              t:"bool"},
   // ── Position sizing ───────────────────────────────────────────────────────
-  dollars_per_bucket:  {l:"$ Per Bucket",       d:"Target dollars at risk per bucket — engine calculates contracts as round($ ÷ NO price). E.g. $5 at 52¢ = 10 contracts. Set to 0 to use Contracts/Market instead.", t:"float", min:0, max:10000, step:0.5},
-  contracts_per_market:{l:"Contracts / Market", d:"Fixed contracts per bucket — used only when $ Per Bucket = 0. Each NO contract pays $1 if NO wins; you pay the NO ask price upfront (e.g. 52¢ × 5 = $2.60 at risk).", t:"int", min:1, max:500},
-  // ── Price filter ──────────────────────────────────────────────────────────
-  max_no_price_cents:  {l:"Max Entry Price (¢)", d:"Skip if the bucket is ALREADY priced above this before your bid. At 70¢ you risk 70¢ to win 30¢ — above that the reward isn't worth it. This is the market's price, not yours.", t:"int", min:1, max:99},
-  min_no_price_cents:  {l:"Min Entry Price (¢)", d:"Skip if the bucket is ALREADY priced below this. Set to 1 for no lower bound (enter anything up to max). Low NO price = market strongly disfavors NO winning.", t:"int", min:1, max:99},
+  contracts_per_market:{l:"Contracts / Market", d:"YES contracts per bucket at 1¢ each. Cost = N × $0.01/bucket. Payout = N × $1.00 on the 1 winning YES per series. Profit = N × $0.94 per series if all 6 fill.", t:"int", min:1, max:500},
   // ── Batch engine ──────────────────────────────────────────────────────────
-  batch_size:          {l:"Batch Size",         d:"Orders per batch POST chunk (Kalshi limit ≈30). 192 orders ÷ 30 = 7 chunks.", t:"int", min:1, max:30},
+  batch_size:          {l:"Batch Size",         d:"Orders per batch POST chunk (Kalshi limit ≈30). 198 orders ÷ 30 = 7 chunks.", t:"int", min:1, max:30},
   batch_concurrency:   {l:"Batch Concurrency",  d:"Simultaneous chunk POSTs per round. 3 chunks × ~47ms RTT ≈ 141ms for all orders.", t:"int", min:1, max:5},
-  batch_inter_round_ms:{l:"Inter-Round Delay",  d:"Extra ms sleep between rounds (0 = RTT-only). Only needed if 429s appear at open.", t:"int", min:0, max:2000},
+  batch_inter_round_ms:{l:"Inter-Round Delay",  d:"Extra ms sleep between rounds (0 = RTT-only). Increase if 429 rate-limit errors appear at open.", t:"int", min:0, max:2000},
   // ── Timing ────────────────────────────────────────────────────────────────
   creation_poll_interval_secs:{l:"Poll Interval (s)",d:"Seconds between creation-watch polls (09:28–09:31 UTC window)", t:"int", min:1, max:60},
   creation_poll_start_utc_hour:  {l:"Watch Start Hour",  d:"UTC hour to begin creation polling (default 9 = 9 UTC)", t:"int", min:0, max:23},
@@ -793,47 +788,34 @@ function updateExposureCalc(s) {
   const el = document.getElementById("exposure-calc");
   if (!el) return;
 
-  const dollars    = parseFloat(s.dollars_per_bucket) || 0;
-  const contracts  = parseInt(s.contracts_per_market) || 1;
-  const minC       = parseInt(s.min_no_price_cents)   || 1;
-  const maxC       = parseInt(s.max_no_price_cents)   || 70;
-  // Use a realistic avg (~55¢) rather than midpoint of 1–70 which would be 35¢
-  // Most weather buckets at open price in the 45–65¢ range
-  const avgC       = minC <= 10 ? Math.round(maxC * 0.75) : Math.round((minC + maxC) / 2);
-  const buckets    = 192;                           // typical qualifying bucket count at open
+  const N       = parseInt(s.contracts_per_market) || 1;
+  const series  = 33;   // weather series
+  const buckets = series * 6;  // 198 total buckets
 
-  let rows = [];
+  // Per bucket: cost = N × $0.01
+  const costPerBucket  = N * 0.01;
+  const totalCost      = costPerBucket * buckets;
 
-  if (dollars > 0) {
-    const contractsAtAvg  = Math.round(dollars / (avgC / 100));
-    const costPerBucket   = contractsAtAvg * (avgC / 100);
-    const totalAll        = costPerBucket * buckets;
-    const totalHalf       = costPerBucket * Math.round(buckets / 2);
-    rows = [
-      `<strong>Mode: $ Per Bucket = $${dollars.toFixed(2)}</strong>`,
-      `Avg NO price ${avgC}¢ → <strong>${contractsAtAvg} contracts</strong> per bucket`,
-      `Cost per bucket: ${contractsAtAvg} × $${(avgC/100).toFixed(2)} = <strong>$${costPerBucket.toFixed(2)}</strong>`,
-      ``,
-      `If all ${buckets} buckets qualify (OI=0):  <strong style="color:var(--red)">$${totalAll.toFixed(2)}</strong> total outlay`,
-      `If ~half qualify (${Math.round(buckets/2)} buckets):  <strong style="color:var(--yellow)">$${totalHalf.toFixed(2)}</strong> total outlay`,
-      ``,
-      `<span style="color:var(--muted)">Payout per bucket if NO wins: ${contractsAtAvg} × $1.00 = $${contractsAtAvg.toFixed(2)}</span>`,
-    ];
-  } else {
-    const costPerBucket = contracts * (avgC / 100);
-    const totalAll      = costPerBucket * buckets;
-    const totalHalf     = costPerBucket * Math.round(buckets / 2);
-    rows = [
-      `<strong>Mode: Fixed ${contracts} contract${contracts!==1?"s":""} per bucket</strong>`,
-      `At avg ${avgC}¢ NO price: ${contracts} × $${(avgC/100).toFixed(2)} = <strong>$${costPerBucket.toFixed(2)}</strong> per bucket`,
-      ``,
-      `If all ${buckets} buckets qualify:  <strong style="color:var(--red)">$${totalAll.toFixed(2)}</strong> total outlay`,
-      `If ~half qualify (${Math.round(buckets/2)} buckets):  <strong style="color:var(--yellow)">$${totalHalf.toFixed(2)}</strong> total outlay`,
-      ``,
-      `<span style="color:var(--muted)">Payout per bucket if NO wins: ${contracts} × $1.00 = $${contracts.toFixed(2)}</span>`,
-      `<span style="color:var(--muted)">To use $ Per Bucket instead, set "$ Per Bucket" above 0</span>`,
-    ];
-  }
+  // Per series: exactly 1 of 6 resolves YES → payout = N × $1.00
+  const payoutPerSeries = N * 1.00;
+  const profitPerSeries = payoutPerSeries - (costPerBucket * 6);  // N×$1 − 6×N×$0.01 = N×$0.94
+
+  const totalPayout = payoutPerSeries * series;   // if all 33 YES winners fill
+  const totalProfit = profitPerSeries * series;
+
+  const rows = [
+    `<strong>YES@1¢ strategy — ${N} contract${N!==1?"s":""}/bucket</strong>`,
+    ``,
+    `Cost per bucket:    ${N} × $0.01 = <strong>$${costPerBucket.toFixed(2)}</strong>`,
+    `Cost per series:    6 × $${costPerBucket.toFixed(2)} = <strong>$${(costPerBucket*6).toFixed(2)}</strong>`,
+    `Total deployed:     ${buckets} buckets × $${costPerBucket.toFixed(2)} = <strong style="color:var(--red)">$${totalCost.toFixed(2)}</strong>`,
+    ``,
+    `Payout per series:  1 YES winner × ${N} × $1.00 = <strong>$${payoutPerSeries.toFixed(2)}</strong>`,
+    `Profit per series:  $${payoutPerSeries.toFixed(2)} − $${(costPerBucket*6).toFixed(2)} = <strong style="color:var(--green)">$${profitPerSeries.toFixed(2)}</strong>`,
+    ``,
+    `Daily profit (all ${series} series fill): <strong style="color:var(--green)">$${totalProfit.toFixed(2)}</strong>`,
+    `<span style="color:var(--muted)">Assumes all 198 YES@1¢ orders fill before EOD.</span>`,
+  ];
 
   el.innerHTML = rows.map(r => r === "" ? "<br>" : `<div>${r}</div>`).join("");
 }
@@ -940,7 +922,7 @@ async function triggerTestLiveBids() {
     const cancelFailed = r.cancel_detail?.filter(c => !c.ok) || [];
 
     let lines = [
-      "=== Live Bid Smoke Test (1¢ NO — auto-cancelled) ===",
+      "=== Live Bid Smoke Test (YES@1¢ — auto-cancelled) ===",
       `Tickers hit:       ${r.tickers_hit}`,
       `Chunks sent:       ${r.chunks}`,
       `Chunk timing:      ${(r.chunk_ms||[]).map((ms,i)=>`chunk${i+1}=${ms}ms`).join(", ")}`,

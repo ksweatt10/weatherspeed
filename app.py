@@ -139,15 +139,14 @@ def api_settings():
 @app.post("/api/settings")
 def api_settings_post():
     data = request.get_json() or {}
-    bool_keys  = {"dry_run", "auto_bid_enabled", "bid_only_zero_oi",
-                  "track_market_timing"}
-    int_keys   = {"contracts_per_market", "max_no_price_cents",
-                  "min_no_price_cents", "creation_poll_interval_secs",
+    bool_keys  = {"dry_run", "auto_bid_enabled", "track_market_timing"}
+    int_keys   = {"contracts_per_market",
+                  "creation_poll_interval_secs",
                   "creation_poll_start_utc_hour",
                   "creation_poll_start_utc_minute",
                   "open_time_utc_hour", "open_time_utc_minute",
                   "batch_size", "batch_concurrency", "batch_inter_round_ms"}
-    float_keys = {"dollars_per_bucket"}
+    float_keys: set = set()
     for k, v in data.items():
         if k in bool_keys:
             runtime_config.set(k, bool(v))
@@ -261,13 +260,12 @@ def api_backfill_research():
 @app.get("/api/test-live-bids")
 def api_test_live_bids():
     """
-    Live API smoke test — places real NO bids at 1¢ on N discovered buckets,
-    then immediately cancels every order.  1¢ NO = 99¢ YES implied, so fills
-    are essentially impossible.
+    Live API smoke test — places real YES bids at 1¢ on N discovered buckets,
+    then immediately cancels every order.  Tests the exact same payload
+    structure used by the live bid engine at 10am.
 
     Query params:
       n=30    number of buckets to hit (default 30 = one batch chunk)
-      rounds  pass n=90 for 3 rounds to test inter-round spacing
 
     Returns per-order result, batch timing, and cancel confirmations.
     """
@@ -292,14 +290,14 @@ def api_test_live_bids():
         if not tickers:
             return {"ok": False, "error": "no tickers available"}
 
-        # Build batch payload — 1¢ NO, GTC, unique client IDs
+        # Build batch payload — YES@1¢ GTC, identical structure to live engine
         orders_payload = [
             {
                 "ticker":          t,
-                "side":            "no",
+                "side":            "yes",
                 "action":          "buy",
                 "count":           1,
-                "no_price":        1,       # 1¢ — essentially unfillable
+                "yes_price":       1,       # 1¢ YES — same as live strategy
                 "client_order_id": f"smoketest-{_uuid.uuid4().hex[:8]}",
                 "time_in_force":   "good_till_canceled",
             }
