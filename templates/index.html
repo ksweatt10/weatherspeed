@@ -193,6 +193,17 @@ input:checked+.slider:before{transform:translateX(18px)}
       <button class="btn" onclick="triggerTestLiveBids()">🔴 Test Live Bids</button>
       <button class="btn primary" onclick="triggerManualBid()">⚡ Manual Bid Cycle</button>
     </div>
+    <div style="margin-top:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <span style="color:var(--muted);font-size:12px;font-weight:500">Contracts / Market:</span>
+      <input type="number" id="contracts-input" min="1" max="500" value="1"
+             style="width:72px;background:var(--surface);border:1px solid var(--border);
+                    color:var(--text);border-radius:6px;padding:4px 8px;font-size:13px;
+                    text-align:center"
+             onkeydown="if(event.key==='Enter') saveContracts()"/>
+      <button class="btn" onclick="saveContracts()">Set</button>
+      <span id="contracts-hint"
+            style="font-size:11px;color:var(--muted)">YES@1¢ × N contracts per bucket</span>
+    </div>
   </div>
 
   <div id="test-result"></div>
@@ -845,6 +856,37 @@ async function triggerManualBid() {
   catch(e) { toast("Error: "+e.message,"err"); }
 }
 
+async function loadContractsSetting() {
+  try {
+    const s = await api("/api/settings");
+    const n = s.contracts_per_market || 1;
+    document.getElementById("contracts-input").value = n;
+    _updateContractsHint(n);
+  } catch {}
+}
+
+function _updateContractsHint(n) {
+  const cost    = (n * 0.01).toFixed(2);
+  const payout  = n.toFixed(0);
+  const profit  = (n * 0.99).toFixed(2);
+  document.getElementById("contracts-hint").textContent =
+    `${n} contract${n!==1?"s":""} × 1¢ = $${cost} cost/bucket — pays $${payout}.00 → $${profit} profit/bucket`;
+}
+
+async function saveContracts() {
+  const n = Math.max(1, parseInt(document.getElementById("contracts-input").value) || 1);
+  document.getElementById("contracts-input").value = n;
+  try {
+    await api("/api/settings", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({contracts_per_market: n})
+    });
+    _updateContractsHint(n);
+    toast(`Contracts/market set to ${n}`, "ok");
+  } catch(e) { toast("Failed: "+e.message,"err"); }
+}
+
 async function triggerRefreshMarkets() {
   try {
     const r = await api("/api/refresh-markets");
@@ -1023,6 +1065,7 @@ setInterval(pollBalance, 60000);
 // ── Init ──────────────────────────────────────────────────────────────────────
 pollState();
 setInterval(pollState, 4000);
+loadContractsSetting();
 document.getElementById("date-pick").value =
   new Date(Date.now()-4*3600000).toISOString().slice(0,10);
 </script>
