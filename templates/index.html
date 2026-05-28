@@ -236,14 +236,17 @@ input:checked+.slider:before{transform:translateX(18px)}
       <label style="color:var(--muted);font-size:12px">Date (ET):</label>
       <input type="date" id="date-pick" style="background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 8px;font-size:12px"/>
       <button class="btn" onclick="loadBids()">Go</button>
+      <button class="btn" onclick="triggerOrderSync()" style="margin-left:8px">🔄 Sync Orders</button>
     </div>
   </div>
+  <!-- Daily summary bar -->
+  <div id="bids-summary" style="display:none;padding:10px 16px;gap:24px;display:flex;flex-wrap:wrap;border-bottom:1px solid var(--border);font-size:13px"></div>
   <div class="tw">
     <table>
       <thead><tr>
-        <th>Time (UTC)</th><th>Ticker</th><th>City</th><th>Bucket</th>
-        <th>Side</th><th>Price</th><th>Qty</th><th>OI at Bid</th>
-        <th>First?</th><th>ms After Open</th><th>Engine ms</th><th>Status</th><th>Dry?</th>
+        <th>City</th><th>Bucket</th><th>Contracts</th>
+        <th>Order</th><th>Filled</th>
+        <th>Result</th><th>Settlement</th><th>Settled At</th><th>P&amp;L</th>
       </tr></thead>
       <tbody id="bids-tbody"></tbody>
     </table>
@@ -496,35 +499,103 @@ async function loadBids() {
     const d = await api("/api/bids?date=" + dp.value);
     const tbody = document.getElementById("bids-tbody");
     const empty = document.getElementById("bids-empty");
-    if (!d.bids.length) { tbody.innerHTML=""; empty.style.display=""; return; }
+    const sumEl = document.getElementById("bids-summary");
+    if (!d.bids.length) {
+      tbody.innerHTML=""; sumEl.style.display="none";
+      empty.style.display=""; return;
+    }
     empty.style.display = "none";
+
+    // ── Summary bar ──────────────────────────────────────────────────────────
+    const placed   = d.bids.filter(b => b.status === "placed" || b.order_status).length;
+    const filled   = d.bids.filter(b => (b.fill_count||0) > 0).length;
+    const wins     = d.bids.filter(b => b.market_result === "yes").length;
+    const losses   = d.bids.filter(b => b.market_result === "no").length;
+    const pending  = d.bids.filter(b => !b.market_result && b.status === "placed").length;
+    const totalPnl = d.bids.reduce((s,b) => s + (b.pnl_cents||0), 0);
+    const pnlStr   = totalPnl > 0 ? `+$${(totalPnl/100).toFixed(2)}`
+                   : totalPnl < 0 ? `-$${(Math.abs(totalPnl)/100).toFixed(2)}` : "—";
+    const pnlColor = totalPnl > 0 ? "var(--green)" : totalPnl < 0 ? "var(--red)" : "var(--muted)";
+    sumEl.style.display = "flex";
+    sumEl.innerHTML = [
+      `<span><strong>${placed}</strong> <span style="color:var(--muted)">placed</span></span>`,
+      `<span><strong>${filled}</strong> <span style="color:var(--muted)">filled</span></span>`,
+      `<span style="color:var(--green)"><strong>${wins}</strong> YES wins</span>`,
+      `<span style="color:var(--red)"><strong>${losses}</strong> NO losses</span>`,
+      `<span style="color:var(--muted)">${pending} pending</span>`,
+      `<span style="color:${pnlColor};font-weight:700">P&L ${pnlStr}</span>`,
+    ].join('<span style="color:var(--border)">│</span>');
+
+    // ── Table rows ───────────────────────────────────────────────────────────
     tbody.innerHTML = d.bids.map(b => {
-      const fp = b.was_first ? '<span class="pill green">✓ FIRST</span>' : '<span class="pill gray">—</span>';
-      const st = b.status==="placed" ? '<span class="pill green">placed</span>'
-               : `<span class="pill red">${b.status||"?"}</span>`;
-      const dr = b.dry_run ? '<span class="pill yellow">dry</span>' : '<span class="pill blue">live</span>';
-      const ts = b.placed_at ? b.placed_at.replace("T"," ").slice(0,19) : "—";
-      const sideYes = (b.side||"no") === "yes";
-      const sidePill = sideYes
-        ? '<span class="pill green">YES</span>'
-        : '<span class="pill blue">NO</span>';
+      // Order status pill
+      const os = b.order_status || (b.status === "placed" ? "resting" : null);
+      const orderPill =
+          os === "settled"  ? '<span class="pill gray">settled</span>'
+        : os === "filled"   ? '<span class="pill green">filled</span>'
+        : os === "resting"  ? '<span class="pill blue">resting</span>'
+        : os === "canceled" ? '<span class="pill red">canceled</span>'
+        : b.status === "placed" ? '<span class="pill blue">resting</span>'
+        : `<span class="pill red">${b.status||"?"}</span>`;
+
+      // Fill display
+      const fillStr = (b.fill_count||0) > 0
+        ? `<strong style="color:var(--green)">${b.fill_count}/${b.contracts}</strong>`
+        : `<span style="color:var(--muted)">0/${b.contracts||"—"}</span>`;
+
+      // Result pill
+      const resPill = b.market_result === "yes"
+        ? '<span class="pill green">YES ✓</span>'
+        : b.market_result === "no"
+        ? '<span class="pill red">NO ✗</span>'
+        : '<span style="color:var(--muted);font-size:11px">pending</span>';
+
+      // Settlement value
+      const expVal = b.expiration_value
+        ? `<strong>${b.expiration_value}°</strong>`
+        : '—';
+
+      // Settled at (ET)
+      let settledStr = "—";
+      if (b.settled_at) {
+        try {
+          const dt = new Date(b.settled_at);
+          settledStr = dt.toLocaleString("en-US", {
+            timeZone:"America/New_York", month:"short", day:"numeric",
+            hour:"2-digit", minute:"2-digit"
+          }) + " ET";
+        } catch(_) { settledStr = b.settled_at.slice(0,16); }
+      }
+
+      // P&L
+      let pnlCell = "—";
+      if (b.pnl_cents != null) {
+        const dollars = (Math.abs(b.pnl_cents)/100).toFixed(2);
+        const col = b.pnl_cents > 0 ? "var(--green)" : b.pnl_cents < 0 ? "var(--red)" : "var(--muted)";
+        pnlCell = `<strong style="color:${col}">${b.pnl_cents >= 0 ? "+" : "-"}$${dollars}</strong>`;
+      }
+
       return `<tr>
-        <td class="mono" style="font-size:11px">${ts}</td>
-        <td class="mono" style="font-size:10px">${b.ticker||"—"}</td>
-        <td>${b.city||"—"}</td>
-        <td>${b.bucket_label||"—"}</td>
-        <td>${sidePill}</td>
-        <td><strong>${b.no_price_cents||0}¢</strong></td>
-        <td>${b.contracts||1}</td>
-        <td>${b.open_interest||0}</td>
-        <td>${fp}</td>
-        <td>${b.ms_after_open!=null ? b.ms_after_open.toLocaleString()+"ms" : "—"}</td>
-        <td>${b.bid_engine_ms!=null ? b.bid_engine_ms+"ms" : "—"}</td>
-        <td>${st}</td>
-        <td>${dr}</td>
+        <td>${b.city||b.ticker||"—"}</td>
+        <td style="font-size:11px">${b.bucket_label||"—"}</td>
+        <td>${b.contracts||"—"}</td>
+        <td>${orderPill}</td>
+        <td>${fillStr}</td>
+        <td>${resPill}</td>
+        <td>${expVal}</td>
+        <td style="font-size:11px;white-space:nowrap">${settledStr}</td>
+        <td>${pnlCell}</td>
       </tr>`;
     }).join("");
   } catch(e) { toast("Bids load failed: "+e.message,"err"); }
+}
+
+async function triggerOrderSync() {
+  try {
+    await api("/api/sync-orders");
+    toast("Order sync triggered","ok");
+    setTimeout(loadBids, 4000);
+  } catch(e) { toast("Sync failed: "+e.message,"err"); }
 }
 
 // ── Research ──────────────────────────────────────────────────────────────────

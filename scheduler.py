@@ -62,6 +62,11 @@ def _daily_rearm():
     _ensure_ws_watcher()
 
 
+def _run_order_poll():
+    from order_poller import run_poll
+    run_poll()
+
+
 def start() -> None:
     sched = BackgroundScheduler(timezone="UTC")
 
@@ -73,11 +78,19 @@ def start() -> None:
     sched.add_job(_start_open_trigger, "cron",
                   hour=13, minute=59, id="timer_fallback")
 
+    # Every 30 min: sync order status + settlement from Kalshi
+    sched.add_job(_run_order_poll, "interval",
+                  minutes=30, id="order_poll")
+
     sched.start()
 
     # ── Always start WS watcher at boot ──────────────────────────────────────
     # ws_client.run() has full auto-reconnect; it stays live indefinitely.
     _ensure_ws_watcher()
+
+    # ── Boot: sync orders immediately (fixes any bad bid_log rows) ───────────
+    from order_poller import start_background_poll
+    start_background_poll()
 
     now = datetime.now(timezone.utc)
 

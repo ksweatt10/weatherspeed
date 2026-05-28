@@ -72,7 +72,15 @@ def init_db() -> None:
             status          TEXT,
             placed_at       TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
             ms_after_open   INTEGER,
-            bid_engine_ms   INTEGER
+            bid_engine_ms   INTEGER,
+            order_status    TEXT,
+            fill_count      INTEGER DEFAULT 0,
+            fill_price_cents INTEGER,
+            market_result   TEXT,
+            expiration_value TEXT,
+            settled_at      TEXT,
+            pnl_cents       INTEGER,
+            synced_at       TEXT
         );
 
         CREATE TABLE IF NOT EXISTS session_log (
@@ -96,6 +104,15 @@ def init_db() -> None:
         _safe_add_column(con, "market_buckets", "open_no_ask",             "REAL")
         _safe_add_column(con, "market_buckets", "open_oi",                 "REAL")
         _safe_add_column(con, "market_buckets", "open_snapshot_at",        "TEXT")
+        # Order lifecycle tracking (added for live-order monitoring)
+        _safe_add_column(con, "bid_log", "order_status",    "TEXT")
+        _safe_add_column(con, "bid_log", "fill_count",      "INTEGER")
+        _safe_add_column(con, "bid_log", "fill_price_cents","INTEGER")
+        _safe_add_column(con, "bid_log", "market_result",   "TEXT")
+        _safe_add_column(con, "bid_log", "expiration_value","TEXT")
+        _safe_add_column(con, "bid_log", "settled_at",      "TEXT")
+        _safe_add_column(con, "bid_log", "pnl_cents",       "INTEGER")
+        _safe_add_column(con, "bid_log", "synced_at",       "TEXT")
 
 
 def _safe_add_column(con, table: str, col: str, dtype: str) -> None:
@@ -348,6 +365,96 @@ def insert_bid(date: str, event_ticker: str, ticker: str, city: str,
               1 if was_first else 0, 1 if dry_run else 0,
               order_id, status, ms_after_open, bid_engine_ms, side))
         return cur.lastrowid
+
+
+def upsert_bid_from_order(order: dict) -> None:
+    """
+    Called by order_poller after fetching a live Kalshi order.
+    Inserts a new bid_log row if none exists for this ticker+date,
+    OR updates order_status / fill_count on an existing row.
+    Fixes rows that were recorded as 'skip:429' during failed batch attempts.
+    """
+    ticker     = order.get("ticker", "")
+    order_id   = order.get("order_id", "")
+    status_raw = order.get("status", "")       # "resting" | "filled" | "canceled"
+    initial    = float(order.get("initial_count_fp") or 0)
+    filled     = float(order.get("fill_count_fp")    or 0)
+    remaining  = float(order.get("remaining_count_fp") or 0)
+    yes_price  = order.get("yes_price_dollars")
+    price_cents = round(float(yes_price) * 100) if yes_price else None
+    created    = order.get("created_time", "")
+    # Derive date in ET from created_time
+    try:
+        from datetime import timedelta
+        dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+        date_et = (dt + timedelta(hours=-4)).date().isoformat()
+    except Exception:
+        date_et = datetime.now(timezone.utc).date().isoformat()
+
+    now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    with _conn() as con:
+        # Try to update an existing row for this ticker on this date
+        cur = con.execute("""
+            UPDATE bid_log SET
+                order_id        = ?,
+                status          = 'placed',
+                order_status    = ?,
+                fill_count      = ?,
+                fill_price_cents = ?,
+                synced_at       = ?
+            WHERE ticker = ? AND date = ?
+              AND (order_id IS NULL OR order_id = ? OR status LIKE 'skip:%')
+        """, (order_id, status_raw, int(filled), price_cents, now_iso,
+              ticker, date_et, order_id))
+
+        if cur.rowcount == 0:
+            # No existing row — insert a minimal one so the poller data appears
+            # (event_ticker and bucket_label left blank; filled in by backfill if needed)
+            con.execute("""
+                INSERT OR IGNORE INTO bid_log
+                    (date, event_ticker, ticker, side, contracts, no_price_cents,
+                     dry_run, order_id, status, placed_at,
+                     order_status, fill_count, fill_price_cents, synced_at)
+                VALUES (?,?,?,'yes',?,1, 0,?,'placed',?,?,?,?,?)
+            """, (date_et, "", ticker, int(initial), order_id, created,
+                  status_raw, int(filled), price_cents, now_iso))
+
+
+def mark_bid_settled(ticker: str, market_result: str, expiration_value: str,
+                     settled_at: str, pnl_cents: int) -> None:
+    """Record settlement result and P&L for all bid_log rows matching ticker."""
+    now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    with _conn() as con:
+        con.execute("""
+            UPDATE bid_log SET
+                market_result    = ?,
+                expiration_value = ?,
+                settled_at       = ?,
+                pnl_cents        = ?,
+                order_status     = 'settled',
+                synced_at        = ?
+            WHERE ticker = ?
+              AND market_result IS NULL
+        """, (market_result, expiration_value, settled_at, pnl_cents, now_iso, ticker))
+
+
+def get_open_bid_order_ids() -> list[dict]:
+    """
+    Return bid_log rows that have an order_id but no settlement yet.
+    Used by the poller to check which markets have resolved.
+    """
+    with _conn() as con:
+        rows = con.execute("""
+            SELECT DISTINCT ticker, order_id, fill_count,
+                            contracts, date
+            FROM bid_log
+            WHERE order_id IS NOT NULL
+              AND order_id != 'DRY_RUN'
+              AND market_result IS NULL
+              AND dry_run = 0
+        """).fetchall()
+    return [dict(r) for r in rows]
 
 
 def get_bid_history(days: int = 14) -> list[dict]:

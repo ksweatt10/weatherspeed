@@ -94,6 +94,15 @@ def api_bids():
     return jsonify({"bids": today, "date": date, "all": bids[:500]})
 
 
+@app.get("/api/sync-orders")
+def api_sync_orders():
+    """Manually trigger order status + settlement sync from Kalshi."""
+    import threading
+    from order_poller import run_poll
+    threading.Thread(target=run_poll, name="manual-order-sync", daemon=True).start()
+    return jsonify({"ok": True, "msg": "Order sync triggered"})
+
+
 @app.get("/api/research")
 def api_research():
     timing       = get_market_timing_history(days=60)
