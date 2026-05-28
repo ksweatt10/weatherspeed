@@ -6,11 +6,12 @@ Phase 1 — CREATION WATCH (starts 09:27 UTC):
   (~09:30:47–09:31:19 UTC historically).
   Records creation times to DB for research tab.
 
-Phase 2 — WS WATCHER (starts 09:27 UTC, runs alongside Phase 1):
+Phase 2 — WS WATCHER (24/7, auto-reconnects):
   Opens WebSocket and subscribes to market_lifecycle_v2 globally.
   'created' events (~09:31) → subscribe ticker channel for those markets.
-  'activated' event (14:00:00:000 UTC) → read ws_state, fire ONE batch POST.
+  'activated' event (14:00:00:000 UTC) → fire ONE batch POST.
   This is the primary bid trigger — zero REST calls at open.
+  Ticker-sync loop picks up newly discovered markets every 10s.
 
 Phase 3 — TIMER FALLBACK (starts 13:59 UTC):
   If WS hasn't fired by 14:00:05 UTC, fall back to REST fetch + batch POST.
@@ -49,11 +50,14 @@ def _next_utc_hhmm(hour: int, minute: int) -> datetime:
 
 async def _discover_todays_markets() -> dict[str, list[dict]]:
     """
-    Poll Kalshi events API for each series, return today's markets.
+    Poll Kalshi events API for each series, return all currently-open markets.
     {event_ticker: [market_dict, ...]}
+
+    Uses status="open" from the Kalshi API — no UTC date filter needed.
+    Markets are open for ~28 hours (created at 09:31 UTC, settle next day),
+    so a UTC date check would incorrectly drop valid markets after 20:00 UTC.
     """
     today_str = _today_et_str()
-    utc_date  = _utcnow().date().isoformat()
     found: dict[str, list] = {}
 
     poll_secs   = runtime_config.get("creation_poll_interval_secs", 5)
@@ -99,9 +103,6 @@ async def _discover_todays_markets() -> dict[str, list[dict]]:
             open_time    = m0.get("open_time", "")
             settlement   = m0.get("occurrence_datetime", "")[:10]
 
-            if not open_time.startswith(utc_date):
-                continue
-
             if runtime_config.get("track_market_timing", True):
                 upsert_market_timing(et, series_ticker, city, kind,
                                      settlement, created_time, open_time)
@@ -124,10 +125,27 @@ async def _discover_todays_markets() -> dict[str, list[dict]]:
     state.set_discovered_markets(found)
     total_buckets = sum(len(v) for v in found.values())
     print(f"[watcher] Discovered {len(found)} events / "
-          f"{total_buckets} markets for {utc_date}")
+          f"{total_buckets} open markets (ET date: {today_str})")
     log_event(today_str, "MARKETS_DISCOVERED",
               f"{len(found)} events, {total_buckets} buckets")
     return found
+
+
+def run_boot_discovery() -> None:
+    """
+    Immediate discovery — no sleep, no polling loop.
+    Used when the bot restarts after the creation window (09:27 UTC) to pick
+    up markets that are already open.  Called from scheduler.start() on boot.
+    """
+    print("[watcher] Boot discovery — fetching currently open markets")
+    found = asyncio.run(_discover_todays_markets())
+    if found:
+        state.set_watch_phase("READY")
+        print(f"[watcher] Boot discovery complete: "
+              f"{len(found)} events / "
+              f"{sum(len(v) for v in found.values())} buckets")
+    else:
+        print("[watcher] Boot discovery: no open markets found yet")
 
 
 def run_creation_watch() -> None:
@@ -164,8 +182,9 @@ def run_creation_watch() -> None:
 
 async def _run_ws_watcher_async() -> None:
     """
-    Long-lived async WS watcher.
-    Connects at 09:27 UTC, stays live until bids fire at 14:00:00 UTC.
+    Long-lived async WS watcher — runs 24/7 with auto-reconnect.
+    Subscribes to market_lifecycle_v2; fires bids on 'activated' event.
+    After bids fire, stays connected for the next day's cycle.
     """
     from kalshi.ws_client import SpeedWSClient
     from speed_bidder import run_bids
