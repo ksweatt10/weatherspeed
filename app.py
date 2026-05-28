@@ -557,6 +557,88 @@ def api_test_batch():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@app.get("/api/test-single-batch")
+def api_test_single_batch():
+    """
+    LIVE test: fire ONE batch POST of all discovered markets, time it, then
+    immediately cancel every placed order. Net cost = $0 (GTC YES@1c won't fill).
+    Returns batch timing, success count, cancel timing.
+    """
+    import asyncio, time as _t, uuid
+    from kalshi.speed_client import SpeedClient
+
+    async def _run():
+        discovered = state.get_discovered_markets()
+        if not discovered:
+            from market_watcher import _discover_todays_markets
+            discovered = await _discover_todays_markets()
+
+        all_markets = [
+            m for mkts in discovered.values() for m in mkts
+        ]
+        if not all_markets:
+            return {"error": "no markets found"}
+
+        order_list = [
+            {
+                "ticker":          m.get("ticker", ""),
+                "side":            "yes",
+                "action":          "buy",
+                "count":           1,
+                "yes_price":       1,
+                "client_order_id": f"btest-{uuid.uuid4().hex[:8]}",
+                "time_in_force":   "good_till_canceled",
+            }
+            for m in all_markets
+            if m.get("ticker")
+        ]
+
+        async with SpeedClient() as client:
+            # ── Single batch POST ─────────────────────────────────────────────
+            t_batch = _t.perf_counter()
+            batch_ok    = 0
+            batch_err   = None
+            placed_ids  = []
+            try:
+                resp = await client._post(
+                    "/portfolio/orders/batched", {"orders": order_list})
+                batch_ms = round((_t.perf_counter() - t_batch) * 1000)
+                orders   = resp.get("orders", [])
+                for o in orders:
+                    oid = o.get("order_id") or o.get("id")
+                    if oid:
+                        placed_ids.append(oid)
+                        batch_ok += 1
+            except Exception as e:
+                batch_ms  = round((_t.perf_counter() - t_batch) * 1000)
+                batch_err = str(e)
+
+            # ── Cancel all immediately ────────────────────────────────────────
+            cancel_ok = 0
+            cancel_ms = 0
+            if placed_ids:
+                t_cancel = _t.perf_counter()
+                cancels  = await client.cancel_orders(placed_ids, concurrency=10)
+                cancel_ms = round((_t.perf_counter() - t_cancel) * 1000)
+                cancel_ok = sum(1 for c in cancels if c.get("ok"))
+
+        return {
+            "markets":      len(order_list),
+            "batch_ms":     batch_ms,
+            "batch_ok":     batch_ok,
+            "batch_error":  batch_err,
+            "is_429":       batch_err is not None and "429" in str(batch_err),
+            "cancel_ok":    cancel_ok,
+            "cancel_ms":    cancel_ms,
+        }
+
+    try:
+        data = asyncio.run(_run())
+        return jsonify({"ok": True, **data})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 
 @app.get("/")
