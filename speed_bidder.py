@@ -150,14 +150,14 @@ async def run_bids() -> None:
                 inter_order_ms  = inter_order_ms,
                 t_open          = t_open,
             )
-        else:  # "wave_batch" — 7 concurrent batches of 30 (~500ms, advanced tier)
+        else:  # "wave_batch" — sequential batches of 30, tail retry on 429 (~300ms)
             bid_coro = client.batch_yes_bids(
                 all_markets,
                 contracts         = contracts,
                 yes_price_cents   = yes_price_cents,
                 dry_run           = dry_run,
                 batch_size        = 30,
-                batch_concurrency = 7,
+                batch_concurrency = 1,
                 inter_round_ms    = 0,
                 t_open            = t_open,
             )

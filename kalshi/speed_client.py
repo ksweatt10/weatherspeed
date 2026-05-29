@@ -342,18 +342,24 @@ class SpeedClient:
               f"(size≤{batch_size}, concurrency={batch_concurrency}, HTTP/2)")
 
         async def _post_chunk(chunk: list[dict], chunk_idx: int):
+            """
+            Single-attempt POST — no blocking sleep retry.
+            Raises on failure so the caller can route 429s to the tail queue.
+            """
             t1   = time.perf_counter()
             resp = await self._post("/portfolio/orders/batched",
-                                    {"orders": chunk})
+                                    {"orders": chunk}, _retry=1)
             t_wall_resp  = time.time()
             ms_engine    = round((time.perf_counter() - t1) * 1000)
             ms_from_open = round((t_wall_resp - _t_open_wall) * 1000)
             print(f"[speed] batch {chunk_idx+1}/{n_chunks} "
-                  f"({len(chunk)} orders) → {ms_engine}ms rtt / "
-                  f"{ms_from_open}ms after open")
+                  f"({len(chunk)}) → {ms_engine}ms rtt / {ms_from_open}ms after open")
             return resp, ms_engine, ms_from_open
 
-        responses: list = []
+        # ── Primary wave ──────────────────────────────────────────────────────
+        all_responses: list = []
+        retry_queue:   list = []   # (chunk, original_chunk_idx)
+
         for round_start in range(0, n_chunks, batch_concurrency):
             round_chunks = chunks[round_start: round_start + batch_concurrency]
             round_tasks  = [
@@ -362,15 +368,34 @@ class SpeedClient:
             ]
             round_results = await asyncio.gather(*round_tasks,
                                                  return_exceptions=True)
-            responses.extend(round_results)
+
+            for i, res in enumerate(round_results):
+                orig_idx = round_start + i
+                if isinstance(res, Exception) and "429" in str(res):
+                    retry_queue.append((chunks[orig_idx], orig_idx))
+                    print(f"[speed] batch {orig_idx+1} → tail retry queue")
+                else:
+                    all_responses.append(res)
 
             if inter_round_ms > 0 and round_start + batch_concurrency < n_chunks:
                 await asyncio.sleep(inter_round_ms / 1000)
 
+        # ── Tail retry — no sleep, natural delay from primary processing ──────
+        if retry_queue:
+            print(f"[speed] tail retry: {len(retry_queue)} batch(es)")
+            for chunk, orig_idx in retry_queue:
+                try:
+                    res = await _post_chunk(chunk, orig_idx)
+                    all_responses.append(res)
+                except Exception as e:
+                    print(f"[speed] tail retry batch {orig_idx+1} failed: {e}")
+                    all_responses.append(e)
+
+        # ── Stamp timings and map results ─────────────────────────────────────
         ms_total      = round((time.perf_counter() - t0) * 1000)
         ms_total_open = round((time.time() - _t_open_wall) * 1000)
 
-        for resp_or_exc in responses:
+        for resp_or_exc in all_responses:
             if isinstance(resp_or_exc, Exception):
                 print(f"[speed] batch error: {resp_or_exc}")
                 for r in to_place:
@@ -386,15 +411,15 @@ class SpeedClient:
                 if not r:
                     continue
                 if item.get("error"):
-                    r["error"]       = str(item["error"])
-                    r["ms_elapsed"]  = ms_after_open
-                    r["engine_ms"]   = ms_engine
+                    r["error"]      = str(item["error"])
+                    r["ms_elapsed"] = ms_after_open
+                    r["engine_ms"]  = ms_engine
                 else:
-                    ord_obj          = item.get("order", {})
-                    r["placed"]      = True
-                    r["order_id"]    = ord_obj.get("order_id") or ord_obj.get("id")
-                    r["ms_elapsed"]  = ms_after_open
-                    r["engine_ms"]   = ms_engine
+                    ord_obj         = item.get("order", {})
+                    r["placed"]     = True
+                    r["order_id"]   = ord_obj.get("order_id") or ord_obj.get("id")
+                    r["ms_elapsed"] = ms_after_open
+                    r["engine_ms"]  = ms_engine
 
         for r in to_place:
             if r["ms_elapsed"] is None:
@@ -403,8 +428,10 @@ class SpeedClient:
                 r["engine_ms"]  = ms_total
 
         placed = sum(1 for r in to_place if r["placed"])
+        retried = len(retry_queue)
         print(f"[speed] batch complete — {placed}/{len(to_place)} placed "
-              f"in {ms_total}ms total")
+              f"in {ms_total}ms total"
+              + (f" ({retried} tail retried)" if retried else ""))
         return results
 
     async def individual_yes_bids(self, markets: list[tuple], contracts: int = 1,
