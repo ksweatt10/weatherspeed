@@ -15,6 +15,13 @@ import time
 from typing import Any
 
 import httpx
+try:
+    import orjson as _json_lib
+    _json_dumps = lambda obj: _json_lib.dumps(obj)   # returns bytes — fast
+except ImportError:
+    import json as _json_lib                          # fallback
+    _json_dumps = lambda obj: _json_lib.dumps(obj).encode()
+
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 
@@ -95,9 +102,10 @@ class SpeedClient:
 
     async def _post(self, path: str, body: dict, _retry: int = 3) -> dict:
         full_path = f"{_PREFIX}{path}"
+        payload   = _json_dumps(body)          # orjson bytes — fastest serialization
         for attempt in range(_retry):
             headers = _auth_headers("POST", full_path)
-            r = await self._client.post(full_path, headers=headers, json=body)
+            r = await self._client.post(full_path, headers=headers, content=payload)
             if r.status_code == 429 and attempt < _retry - 1:
                 await asyncio.sleep(0.5 * (attempt + 1))   # 0.5s, 1.0s
                 continue

@@ -2,6 +2,14 @@
 Weather Speed Bot — Flask dashboard (port 8002).
 """
 from __future__ import annotations
+
+# ── Fast event loop (must be before any asyncio usage) ───────────────────────
+try:
+    import uvloop
+    uvloop.install()
+except ImportError:
+    pass  # uvloop not available — fall back to default asyncio loop
+
 from flask import Flask, jsonify, render_template, request
 from datetime import datetime, timezone, timedelta
 
