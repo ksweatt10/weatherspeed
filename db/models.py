@@ -419,18 +419,10 @@ def upsert_bid_from_order(order: dict) -> None:
               remaining, queue_pos, now_iso,
               ticker, date_et, order_id))
 
-        if cur.rowcount == 0:
-            # No existing row — insert a minimal one so the poller data appears
-            con.execute("""
-                INSERT OR IGNORE INTO bid_log
-                    (date, event_ticker, ticker, side, contracts, no_price_cents,
-                     dry_run, order_id, status, placed_at,
-                     order_status, fill_count, fill_price_cents,
-                     remaining_count, queue_position, synced_at)
-                VALUES (?,?,?,'yes',?,1, 0,?,'placed',?,?,?,?,?,?,?)
-            """, (date_et, "", ticker, int(initial), order_id, created,
-                  status_raw, int(filled), price_cents,
-                  remaining, queue_pos, now_iso))
+        # Do NOT insert new rows for orders with no existing bid_log entry.
+        # The sync should only update rows that the bot already recorded at bid time.
+        # Inserting here causes historical Kalshi orders to appear as phantom rows
+        # on today's date whenever the full executed-order history is paginated.
 
 
 def mark_bid_settled(ticker: str, market_result: str, expiration_value: str,
