@@ -10,9 +10,9 @@ _defaults: dict = {
     # ── Bidding ──────────────────────────────────────────────────────────────
     "dry_run":              False,   # False = live orders; True = evaluate only
     "auto_bid_enabled":     True,    # actually fire orders at market open
-    "contracts_per_market": 1,       # YES contracts per bucket (cost = N × $0.01)
+    "contracts_per_market": 5,       # YES contracts per bucket (cost = N × $0.02 at 2¢)
     "inter_order_ms":       0,       # ms sleep between orders — 0 = rely on natural 13ms RTT
-    "yes_price_cents":      1,       # limit price per YES order (1¢)
+    "yes_price_cents":      2,       # limit price per YES order (2¢ = best fill rate)
     "bid_strategy":         "sequential",  # sequential (optimal ~7.9s) or wave_batch
 
     # ── Timing ───────────────────────────────────────────────────────────────
