@@ -11,7 +11,9 @@ _defaults: dict = {
     "dry_run":              True,    # True = evaluate only, never place real orders
     "auto_bid_enabled":     True,    # actually fire orders at market open
     "contracts_per_market": 1,       # YES contracts per bucket (cost = N × $0.01)
-    "inter_order_ms":       40,      # ms between individual order POSTs (~8s for 198 orders)
+    "inter_order_ms":       0,       # ms sleep between orders — 0 = rely on natural 13ms RTT
+    "yes_price_cents":      1,       # limit price per YES order (1¢)
+    "bid_strategy":         "sequential",  # sequential (optimal ~7.9s) or wave_batch
 
     # ── Timing ───────────────────────────────────────────────────────────────
     # Markets created daily ~09:30–09:31 UTC; open exactly 14:00:00 UTC

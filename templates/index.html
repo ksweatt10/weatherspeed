@@ -848,8 +848,8 @@ const SMETA = {
   contracts_per_market:{l:"Contracts / Market", d:"YES contracts per bucket. Cost = N × yes_price_cents / 100 per bucket. Payout = N × $1.00 on the winning YES. Profit = N × (100 - yes_price_cents) × 33 / 100 per day.", t:"int", min:1, max:500},
   yes_price_cents:     {l:"YES Bid Price (¢)",  d:"Cents to bid per YES contract. 1¢ = cheapest, lowest fill priority. 2¢ beats all 1¢ orders on price. Higher price = better queue position but lower profit per win.", t:"int", min:1, max:50},
   // ── Order engine ──────────────────────────────────────────────────────────
-  bid_strategy:        {l:"Bid Strategy",           d:"wave_batch: 7 concurrent batches of 30 = ~500ms total (advanced tier, default). sequential: one order at a time with inter_order_ms delay = ~10s total (safe fallback).", t:"select", options:["wave_batch","sequential"]},
-  inter_order_ms:      {l:"Inter-Order Delay (ms)", d:"ms between individual order POSTs (sequential mode only). 40ms × 198 orders ≈ 10s total.", t:"int", min:0, max:500},
+  bid_strategy:        {l:"Bid Strategy",           d:"sequential: 198 individual orders, 0ms sleep, 50ms retry on 429 — ~7.9s, 198/198 placed (OPTIMAL). wave_batch: 7 batches of 30 via batch endpoint — ~9s, limited by 2/3s window (slower).", t:"select", options:["sequential","wave_batch"]},
+  inter_order_ms:      {l:"Inter-Order Delay (ms)", d:"Sleep between individual orders (sequential mode). 0 = optimal — natural 13ms RTT provides enough spacing, 50ms auto-retry on 429. Set >0 only to slow intentionally.", t:"int", min:0, max:500},
   // ── Timing ────────────────────────────────────────────────────────────────
   creation_poll_interval_secs:{l:"Poll Interval (s)",d:"Seconds between creation-watch polls (09:28–09:31 UTC window)", t:"int", min:1, max:60},
   creation_poll_start_utc_hour:  {l:"Watch Start Hour",  d:"UTC hour to begin creation polling (default 9 = 9 UTC)", t:"int", min:0, max:23},
