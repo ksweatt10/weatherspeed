@@ -8,7 +8,7 @@ _lock = threading.Lock()
 
 _defaults: dict = {
     # ── Bidding ──────────────────────────────────────────────────────────────
-    "dry_run":              True,    # True = evaluate only, never place real orders
+    "dry_run":              False,   # False = live orders; True = evaluate only
     "auto_bid_enabled":     True,    # actually fire orders at market open
     "contracts_per_market": 1,       # YES contracts per bucket (cost = N × $0.01)
     "inter_order_ms":       0,       # ms sleep between orders — 0 = rely on natural 13ms RTT

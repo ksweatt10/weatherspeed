@@ -216,7 +216,13 @@ async def _run_ws_watcher_async() -> None:
             f"[ws_watcher] ACTIVATED {ticker} — "
             f"firing batch at {_utcnow().strftime('%H:%M:%S.%f UTC')}"
         )
-        await run_bids()
+        try:
+            await run_bids()
+        except Exception as exc:
+            # Reset the claim so the timer fallback can still fire if it hasn't passed
+            print(f"[ws_watcher] ERROR in run_bids: {exc} — resetting claim flag")
+            state.reset_bids_fired()
+            raise
 
     ws_client = SpeedWSClient(on_market_open=_on_activated)
 
@@ -530,11 +536,13 @@ def run_open_trigger() -> None:
     if wait > 0:
         time.sleep(wait)
 
-    if not state.claim_bids_fired():
+    if state.claim_bids_fired():
+        # Timer won the claim — WS path didn't fire in time
         print(f"[watcher] FALLBACK TRIGGER — WS path missed, firing REST bids "
               f"at {_utcnow().strftime('%H:%M:%S.%f UTC')}")
         state.set_watch_phase("FIRING")
         asyncio.run(run_bids())
     else:
+        # WS already claimed and fired — nothing to do
         print("[watcher] Timer fallback: WS already fired — nothing to do")
         state.set_watch_phase("IDLE")

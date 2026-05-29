@@ -168,9 +168,7 @@ class SpeedWSClient:
             if _state_module.record_first_bid(ticker, ts_ms):
                 log.info(f"[ws] FIRST BID  {ticker}  oi={new_oi}  ts={ts_ms}")
                 # Persist to DB asynchronously (fire and forget)
-                asyncio.get_event_loop().create_task(
-                    _persist_first_bid(ticker, ts_ms)
-                )
+                asyncio.create_task(_persist_first_bid(ticker, ts_ms))
 
         # Update both fast-path and dashboard state
         data = {
@@ -201,8 +199,10 @@ class SpeedWSClient:
             log.info(f"[ws] ACTIVATED {ticker} — market is OPEN")
             if not self._activated_fired and self.on_market_open:
                 self._activated_fired = True
-                asyncio.get_event_loop().create_task(
-                    self.on_market_open(ticker)
+                task = asyncio.create_task(self.on_market_open(ticker))
+                task.add_done_callback(
+                    lambda t: log.error(f"[ws] on_market_open raised: {t.exception()}")
+                    if not t.cancelled() and t.exception() else None
                 )
 
     # ── Main loop ─────────────────────────────────────────────────────────────
