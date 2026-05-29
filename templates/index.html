@@ -848,7 +848,8 @@ const SMETA = {
   contracts_per_market:{l:"Contracts / Market", d:"YES contracts per bucket. Cost = N × yes_price_cents / 100 per bucket. Payout = N × $1.00 on the winning YES. Profit = N × (100 - yes_price_cents) × 33 / 100 per day.", t:"int", min:1, max:500},
   yes_price_cents:     {l:"YES Bid Price (¢)",  d:"Cents to bid per YES contract. 1¢ = cheapest, lowest fill priority. 2¢ beats all 1¢ orders on price. Higher price = better queue position but lower profit per win.", t:"int", min:1, max:50},
   // ── Order engine ──────────────────────────────────────────────────────────
-  inter_order_ms:      {l:"Inter-Order Delay (ms)", d:"ms between individual order POSTs. 40ms × 198 orders ≈ 8s total. Increase if 429 errors appear at open.", t:"int", min:0, max:500},
+  bid_strategy:        {l:"Bid Strategy",           d:"wave_batch: 7 concurrent batches of 30 = ~500ms total (advanced tier, default). sequential: one order at a time with inter_order_ms delay = ~10s total (safe fallback).", t:"select", options:["wave_batch","sequential"]},
+  inter_order_ms:      {l:"Inter-Order Delay (ms)", d:"ms between individual order POSTs (sequential mode only). 40ms × 198 orders ≈ 10s total.", t:"int", min:0, max:500},
   // ── Timing ────────────────────────────────────────────────────────────────
   creation_poll_interval_secs:{l:"Poll Interval (s)",d:"Seconds between creation-watch polls (09:28–09:31 UTC window)", t:"int", min:1, max:60},
   creation_poll_start_utc_hour:  {l:"Watch Start Hour",  d:"UTC hour to begin creation polling (default 9 = 9 UTC)", t:"int", min:0, max:23},
@@ -868,6 +869,9 @@ async function loadSettings() {
         ctrl = `<label class="toggle"><input type="checkbox" id="s_${k}" ${v?"checked":""}><span class="slider"></span></label>`;
       } else if (m.t === "float") {
         ctrl = `<input class="ni" type="number" id="s_${k}" value="${v??0}" min="${m.min||0}" max="${m.max||9999}" step="${m.step||0.5}" style="width:85px">`;
+      } else if (m.t === "select") {
+        const opts = m.options.map(o => `<option value="${o}"${v===o?" selected":""}>${o}</option>`).join("");
+        ctrl = `<select class="ni" id="s_${k}" style="width:140px">${opts}</select>`;
       } else {
         ctrl = `<input class="ni" type="number" id="s_${k}" value="${v??""}" min="${m.min||0}" max="${m.max||9999}">`;
       }
@@ -885,6 +889,7 @@ async function saveSettings() {
     if (!el) continue;
     if (m.t === "bool")        p[k] = el.checked;
     else if (m.t === "float")  p[k] = parseFloat(el.value) || 0;
+    else if (m.t === "select") p[k] = el.value;
     else                       p[k] = parseInt(el.value, 10);
   }
   try {

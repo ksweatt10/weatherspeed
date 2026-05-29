@@ -90,11 +90,12 @@ async def run_bids() -> None:
     t_open = datetime(_d.year, _d.month, _d.day, _oh, _om, 0,
                       tzinfo=timezone.utc).timestamp()
 
-    dry_run        = runtime_config.get("dry_run",              True)
-    contracts      = runtime_config.get("contracts_per_market", 1)
-    auto_bid       = runtime_config.get("auto_bid_enabled",     True)
-    inter_order_ms = runtime_config.get("inter_order_ms",       40)
-    yes_price_cents = runtime_config.get("yes_price_cents",      1)
+    dry_run         = runtime_config.get("dry_run",              True)
+    contracts       = runtime_config.get("contracts_per_market", 1)
+    auto_bid        = runtime_config.get("auto_bid_enabled",     True)
+    inter_order_ms  = runtime_config.get("inter_order_ms",       40)
+    yes_price_cents = runtime_config.get("yes_price_cents",       1)
+    bid_strategy    = runtime_config.get("bid_strategy",  "wave_batch")
 
     if not auto_bid:
         print("[bidder] auto_bid_enabled=False — skipping")
@@ -121,7 +122,7 @@ async def run_bids() -> None:
     ]
     total = len(all_markets)
 
-    print(f"[bidder] {'DRY RUN' if dry_run else 'LIVE'} — "
+    print(f"[bidder] {'DRY RUN' if dry_run else 'LIVE'} [{bid_strategy}] — "
           f"YES at {yes_price_cents}¢ on {total} buckets across {len(discovered)} series "
           f"({contracts} contracts each)")
 
@@ -140,15 +141,28 @@ async def run_bids() -> None:
         await client.__aenter__()
 
     try:
-        results, _snap_count = await asyncio.gather(
-            client.individual_yes_bids(
+        if bid_strategy == "sequential":
+            bid_coro = client.individual_yes_bids(
                 all_markets,
                 contracts       = contracts,
                 yes_price_cents = yes_price_cents,
                 dry_run         = dry_run,
                 inter_order_ms  = inter_order_ms,
                 t_open          = t_open,
-            ),
+            )
+        else:  # "wave_batch" — 7 concurrent batches of 30 (~500ms, advanced tier)
+            bid_coro = client.batch_yes_bids(
+                all_markets,
+                contracts         = contracts,
+                yes_price_cents   = yes_price_cents,
+                dry_run           = dry_run,
+                batch_size        = 30,
+                batch_concurrency = 7,
+                inter_round_ms    = 0,
+                t_open            = t_open,
+            )
+        results, _snap_count = await asyncio.gather(
+            bid_coro,
             _snapshot_markets(client, discovered, snapshot_at),
         )
     finally:
