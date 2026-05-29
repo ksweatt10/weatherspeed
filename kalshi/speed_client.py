@@ -437,7 +437,7 @@ class SpeedClient:
     async def individual_yes_bids(self, markets: list[tuple], contracts: int = 1,
                                    yes_price_cents: int = 1,
                                    dry_run: bool = True,
-                                   inter_order_ms: int = 40,
+                                   inter_order_ms: int = 0,
                                    t_open: float | None = None) -> list[dict]:
         """
         Place YES limit orders one at a time via POST /portfolio/orders.
@@ -491,7 +491,7 @@ class SpeedClient:
                 "time_in_force":   "good_till_canceled",
             }
 
-            for attempt in range(3):
+            for attempt in range(5):
                 try:
                     resp = await self._post("/portfolio/orders", body)
                     t_wall_resp  = time.time()
@@ -504,8 +504,9 @@ class SpeedClient:
                     r["engine_ms"]  = ms_engine
                     break
                 except Exception as exc:
-                    if "429" in str(exc) and attempt < 2:
-                        await asyncio.sleep(1.0 * (attempt + 1))
+                    if "429" in str(exc) and attempt < 4:
+                        # Wait exactly 1 order-worth of token refill (15 tok / 300 tok/s = 50ms)
+                        await asyncio.sleep(0.050)
                         continue
                     r["error"]      = str(exc)
                     r["ms_elapsed"] = round((time.time() - _t_open_wall) * 1000)

@@ -93,9 +93,9 @@ async def run_bids() -> None:
     dry_run         = runtime_config.get("dry_run",              True)
     contracts       = runtime_config.get("contracts_per_market", 1)
     auto_bid        = runtime_config.get("auto_bid_enabled",     True)
-    inter_order_ms  = runtime_config.get("inter_order_ms",       40)
+    inter_order_ms  = runtime_config.get("inter_order_ms",        0)
     yes_price_cents = runtime_config.get("yes_price_cents",       1)
-    bid_strategy    = runtime_config.get("bid_strategy",  "wave_batch")
+    bid_strategy    = runtime_config.get("bid_strategy",  "sequential")
 
     if not auto_bid:
         print("[bidder] auto_bid_enabled=False — skipping")
