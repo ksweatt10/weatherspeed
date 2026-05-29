@@ -60,7 +60,7 @@ async def _sync_orders(client: SpeedClient) -> int:
     resting_orders: list[dict] = []
     filled_orders:  list[dict] = []
 
-    for status_filter in ("resting", "filled"):
+    for status_filter in ("resting", "executed"):  # Kalshi uses "executed" not "filled"
         cursor = ""
         while True:
             params: dict = {"status": status_filter, "limit": 200}
@@ -73,6 +73,8 @@ async def _sync_orders(client: SpeedClient) -> int:
                     if status_filter == "resting":
                         resting_orders.append(o)
                     else:
+                        # Normalize Kalshi's "executed" → "filled" for DB/UI consistency
+                        o["status"] = "filled"
                         filled_orders.append(o)
             cursor = data.get("cursor", "")
             if not cursor or not orders:
