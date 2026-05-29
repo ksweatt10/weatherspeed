@@ -234,8 +234,7 @@ input:checked+.slider:before{transform:translateX(18px)}
     <h2>Bid History</h2>
     <div class="acts">
       <label style="color:var(--muted);font-size:12px">Date (ET):</label>
-      <input type="date" id="date-pick" style="background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 8px;font-size:12px"/>
-      <button class="btn" onclick="loadBids()">Go</button>
+      <input type="date" id="date-pick" onchange="loadBids()" style="background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 8px;font-size:12px"/>
       <button class="btn" onclick="triggerOrderSync()" style="margin-left:8px">🔄 Sync Orders</button>
       <button class="btn" id="cancel-btn" onclick="cancelAllResting()" style="margin-left:8px;background:var(--red);color:#fff">✕ Cancel Resting</button>
       <span id="cancel-result" style="margin-left:10px;font-size:12px;color:var(--muted)"></span>
@@ -510,24 +509,40 @@ async function loadBids() {
     empty.style.display = "none";
 
     // ── Summary bar ──────────────────────────────────────────────────────────
-    const placed   = d.bids.filter(b => b.status === "placed" || b.order_status).length;
-    const filled   = d.bids.filter(b => (b.fill_count||0) > 0).length;
-    const wins     = d.bids.filter(b => b.market_result === "yes").length;
-    const losses   = d.bids.filter(b => b.market_result === "no").length;
-    const pending  = d.bids.filter(b => !b.market_result && b.status === "placed").length;
-    const totalPnl = d.bids.reduce((s,b) => s + (b.pnl_cents||0), 0);
-    const pnlStr   = totalPnl > 0 ? `+$${(totalPnl/100).toFixed(2)}`
-                   : totalPnl < 0 ? `-$${(Math.abs(totalPnl)/100).toFixed(2)}` : "—";
-    const pnlColor = totalPnl > 0 ? "var(--green)" : totalPnl < 0 ? "var(--red)" : "var(--muted)";
+    const liveBids  = d.bids.filter(b => !b.dry_run);
+    const placed    = liveBids.length;
+    const filled    = liveBids.filter(b => (b.fill_count||0) > 0).length;
+
+    // Settled bids (market resolved)
+    const settled   = liveBids.filter(b => b.market_result);
+    const wins      = settled.filter(b => b.market_result === "yes").length;
+    const losses    = settled.filter(b => b.market_result === "no").length;
+    const settledPnl = settled.reduce((s,b) => s + (b.pnl_cents||0), 0);
+    const pnlStr    = settledPnl > 0 ? `+$${(settledPnl/100).toFixed(2)}`
+                    : settledPnl < 0 ? `-$${(Math.abs(settledPnl)/100).toFixed(2)}` : "$0.00";
+    const pnlColor  = settledPnl > 0 ? "var(--green)" : settledPnl < 0 ? "var(--red)" : "var(--muted)";
+
+    // Open bids (not yet settled)
+    const open      = liveBids.filter(b => !b.market_result);
+    const resting   = open.filter(b => (b.order_status||"") === "resting" || (!b.order_status && b.status === "placed")).length;
+    const openFilled = open.filter(b => (b.fill_count||0) > 0).length;
+
     sumEl.style.display = "flex";
+    const sep = '<span style="color:var(--border);margin:0 4px">│</span>';
+    const secSep = '<span style="color:var(--border);margin:0 8px;font-size:16px">┃</span>';
     sumEl.innerHTML = [
-      `<span><strong>${placed}</strong> <span style="color:var(--muted)">placed</span></span>`,
-      `<span><strong>${filled}</strong> <span style="color:var(--muted)">filled</span></span>`,
-      `<span style="color:var(--green)"><strong>${wins}</strong> YES wins</span>`,
-      `<span style="color:var(--red)"><strong>${losses}</strong> NO losses</span>`,
-      `<span style="color:var(--muted)">${pending} pending</span>`,
+      // Open / pending section
+      `<span style="color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.6px">Open</span>`,
+      `<span><strong>${open.length}</strong> <span style="color:var(--muted)">bids</span></span>`,
+      `<span><strong style="color:var(--accent)">${resting}</strong> <span style="color:var(--muted)">resting</span></span>`,
+      `<span><strong style="color:var(--green)">${openFilled}</strong> <span style="color:var(--muted)">filled</span></span>`,
+      secSep,
+      // Settled section
+      `<span style="color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.6px">Settled</span>`,
+      `<span style="color:var(--green)"><strong>${wins}</strong> YES ✓</span>`,
+      `<span style="color:var(--red)"><strong>${losses}</strong> NO ✗</span>`,
       `<span style="color:${pnlColor};font-weight:700">P&L ${pnlStr}</span>`,
-    ].join('<span style="color:var(--border)">│</span>');
+    ].join(sep);
 
     // ── Table rows ───────────────────────────────────────────────────────────
     tbody.innerHTML = d.bids.map(b => {
