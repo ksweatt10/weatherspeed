@@ -97,6 +97,12 @@ async def run_bids() -> None:
     yes_price_cents = runtime_config.get("yes_price_cents",       1)
     bid_strategy    = runtime_config.get("bid_strategy",  "sequential")
 
+    bot_enabled = runtime_config.get("bot_enabled", True)
+    if not bot_enabled:
+        print("[bidder] Bot disabled (bot_enabled=False) — skipping")
+        state.set_watch_phase("IDLE")
+        return
+
     if not auto_bid:
         print("[bidder] auto_bid_enabled=False — skipping")
         state.set_watch_phase("IDLE")

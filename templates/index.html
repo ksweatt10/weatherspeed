@@ -417,8 +417,13 @@ async function pollState() {
     pb.textContent = s.watch_phase; pb.className = "badge " + s.watch_phase;
 
     const db = document.getElementById("dry-badge");
-    db.textContent = s.dry_run ? "DRY RUN" : "🔴 LIVE";
-    db.className   = s.dry_run ? "badge" : "badge live";
+    if (!s.bot_enabled) {
+      db.textContent = "BOT OFF"; db.className = "badge";
+    } else if (s.dry_run) {
+      db.textContent = "DRY RUN"; db.className = "badge";
+    } else {
+      db.textContent = "🔴 LIVE"; db.className = "badge live";
+    }
 
     const wb  = document.getElementById("ws-badge");
     const ws  = s.ws || {};
@@ -439,8 +444,16 @@ async function pollState() {
     document.getElementById("ov-bids").textContent    = s.last_bid_count;
     document.getElementById("ov-fired").textContent   = s.bids_fired_today ? "YES" : "no";
     document.getElementById("ov-fired").style.color   = s.bids_fired_today ? "var(--green)" : "var(--muted)";
-    document.getElementById("ov-mode").textContent    = s.dry_run ? "DRY RUN" : "LIVE";
-    document.getElementById("ov-mode").style.color    = s.dry_run ? "var(--yellow)" : "var(--red)";
+    if (!s.bot_enabled) {
+      document.getElementById("ov-mode").textContent = "DISABLED";
+      document.getElementById("ov-mode").style.color = "var(--muted)";
+    } else if (s.dry_run) {
+      document.getElementById("ov-mode").textContent = "DRY RUN";
+      document.getElementById("ov-mode").style.color = "var(--yellow)";
+    } else {
+      document.getElementById("ov-mode").textContent = "LIVE";
+      document.getElementById("ov-mode").style.color = "var(--red)";
+    }
 
     // Markets table — auto-renders once on first discovery, then frozen.
     // Refresh button is the only way to update it after that.
@@ -856,6 +869,7 @@ function renderFirstTradesTable(rows) {
 // ── Settings ──────────────────────────────────────────────────────────────────
 const SMETA = {
   // ── Mode ──────────────────────────────────────────────────────────────────
+  bot_enabled:         {l:"Bot Enabled",        d:"Master on/off switch. When OFF the bot skips all market watching, polling, and bidding entirely.", t:"bool"},
   dry_run:             {l:"Dry Run",            d:"Simulate bids — evaluate and log, but never place real orders",       t:"bool"},
   auto_bid_enabled:    {l:"Auto-Bid Enabled",   d:"Fire bids automatically when the market opens at 14:00 UTC",          t:"bool"},
   track_market_timing: {l:"Track Timing",       d:"Record market creation + open times to the research DB",              t:"bool"},

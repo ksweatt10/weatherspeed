@@ -329,7 +329,7 @@ def main() -> None:
     args = parser.parse_args()
 
     date = args.date or _today_et()
-    asyncio.run(_run(args.event_ticker, date, args.save))
+    asyncio.run(_run(date, args.event_ticker, args.save))
 
 
 if __name__ == "__main__":

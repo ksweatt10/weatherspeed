@@ -90,7 +90,8 @@ async def discover_btc_event(client: SpeedClient,
 async def _run(event_ticker: str | None,
                dry_run: bool,
                contracts: int,
-               yes_price_cents: int) -> None:
+               yes_price_cents: int,
+               fire_now: bool = False) -> None:
 
     init_db()
     today = _today_et()
@@ -123,17 +124,20 @@ async def _run(event_ticker: str | None,
           f"= ${yes_price_cents * contracts * n / 100:.2f} cost")
 
     # ── 2. Sleep until pre-warm window ───────────────────────────────────────
-    prewarm_dt = open_dt - timedelta(seconds=_PREWARM_LEAD_SECS)
-    wait_prewarm = (prewarm_dt - _utcnow()).total_seconds()
+    if fire_now:
+        print(f"[btc_bidder] --now flag: skipping sleep, firing immediately")
+    else:
+        prewarm_dt = open_dt - timedelta(seconds=_PREWARM_LEAD_SECS)
+        wait_prewarm = (prewarm_dt - _utcnow()).total_seconds()
 
-    if wait_prewarm > 60:
-        print(f"[btc_bidder] Sleeping {wait_prewarm:.0f}s until pre-warm at "
-              f"{prewarm_dt.strftime('%H:%M:%S UTC')} ...")
-        time.sleep(wait_prewarm - 1)   # wake up 1s early for precision loop
+        if wait_prewarm > 60:
+            print(f"[btc_bidder] Sleeping {wait_prewarm:.0f}s until pre-warm at "
+                  f"{prewarm_dt.strftime('%H:%M:%S UTC')} ...")
+            time.sleep(wait_prewarm - 1)   # wake up 1s early for precision loop
 
-    # Precision spin until pre-warm time
-    while _utcnow() < prewarm_dt:
-        time.sleep(0.05)
+        # Precision spin until pre-warm time
+        while _utcnow() < prewarm_dt:
+            time.sleep(0.05)
 
     # ── 3. Pre-warm — open connection + dummy GET to establish TCP/TLS ────────
     print(f"[btc_bidder] Pre-warming connection at "
@@ -147,8 +151,9 @@ async def _run(event_ticker: str | None,
         print(f"[btc_bidder] Pre-warm warning (non-fatal): {exc}")
 
     # ── 4. Precision sleep until exact open ───────────────────────────────────
-    while _utcnow() < open_dt:
-        time.sleep(0.001)   # 1ms spin loop for < 10s remaining
+    if not fire_now:
+        while _utcnow() < open_dt:
+            time.sleep(0.001)   # 1ms spin loop for < 10s remaining
 
     fire_ts = _utcnow()
     print(f"[btc_bidder] FIRING at {fire_ts.strftime('%H:%M:%S.%f UTC')[:-3]}")
@@ -162,16 +167,15 @@ async def _run(event_ticker: str | None,
     market_tuples = [(et, m) for m in markets]
 
     try:
-        # 80 buckets → 3 batches of 26-27 orders, all fired concurrently via HTTP/2
-        results = await warm_client.batch_yes_bids(
-            markets           = market_tuples,
-            contracts         = contracts,
-            yes_price_cents   = yes_price_cents,
-            dry_run           = dry_run,
-            batch_size        = 30,
-            batch_concurrency = 3,   # all batches in parallel
-            inter_round_ms    = 0,
-            t_open            = t_open_wall,
+        # 80 buckets fired one at a time — same path as the weather bot (production-proven)
+        # 80 orders × ~13ms RTT = ~1s total, still first in queue on an empty book
+        results = await warm_client.individual_yes_bids(
+            markets         = market_tuples,
+            contracts       = contracts,
+            yes_price_cents = yes_price_cents,
+            dry_run         = dry_run,
+            inter_order_ms  = 0,
+            t_open          = t_open_wall,
         )
     finally:
         await warm_client.__aexit__(None, None, None)
@@ -223,6 +227,8 @@ def main() -> None:
                         help=f"Contracts per bucket (default: {_DEFAULT_CONTRACTS})")
     parser.add_argument("--price",     type=int, default=_DEFAULT_PRICE_CENTS,
                         help=f"YES limit price in cents (default: {_DEFAULT_PRICE_CENTS})")
+    parser.add_argument("--now",       action="store_true",
+                        help="Skip timing sleep — fire immediately (for testing)")
     args = parser.parse_args()
 
     asyncio.run(_run(
@@ -230,6 +236,7 @@ def main() -> None:
         dry_run         = args.dry_run,
         contracts       = args.contracts,
         yes_price_cents = args.price,
+        fire_now        = args.now,
     ))
 
 

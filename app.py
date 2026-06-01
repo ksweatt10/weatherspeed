@@ -89,6 +89,7 @@ def api_state():
         "last_bid_count": len(s.get("last_bid_run", [])),
         "errors":         s.get("errors", []),
         "dry_run":        runtime_config.get("dry_run", True),
+        "bot_enabled":    runtime_config.get("bot_enabled", True),
         "ws":             ws_status,
         "bids_fired_today": s.get("bids_fired_today", False),
     })
